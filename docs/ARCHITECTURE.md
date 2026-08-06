@@ -66,7 +66,11 @@ The implemented evaluation scope is `deterministic_tool_contract`:
 - forbidden tool absence, and
 - explicit handoff tool/argument contracts.
 
-Natural-language outcomes and forbidden behaviors are surfaced as unscored metadata. Agent-policy failures return `fail`; timeout, malformed response, adapter exception and max-turn failures return `error`. No run persistence or background worker exists in this slice.
+Argument constraints run only when the corresponding tool event exists. A missing required tool emits one missing-tool failure without cascading argument mismatches; a missing optional tool emits no check.
+
+Fixture `deterministic_checks` IDs are declarative descriptions, not evaluator instructions. They are copied to `declared_checks` and `unscored_declared_checks`; the engine neither parses their names nor infers that an ID was executed. Actual coverage is represented only by checks generated from `expected_tool_calls`, their constraints and `forbidden_tool_calls`. Natural-language outcomes and forbidden behaviors are surfaced as `unscored_expectations` metadata.
+
+Agent-policy failures return `fail`; timeout, malformed response, adapter exception and max-turn failures return `error`. No run persistence or background worker exists in this slice.
 
 ## Core domain objects
 

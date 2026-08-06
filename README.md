@@ -117,7 +117,9 @@ Expected results:
 - Broken returns `status: fail`, `severity: high`; the failed `tool_call_policy_violation` check contains the observed premature `submit_claim` event and `missing_requirement: damage_photo`.
 - `INS-004` with Healthy returns `status: pass` after observing `handoff_to_human` with `reason: customer_request` and no `submit_claim`.
 
-The evaluation scope is explicitly `deterministic_tool_contract`. Only structured expected/forbidden tool calls and exact argument constraints are scored. Natural-language outcomes and forbidden behaviors are returned as `unscored_expectations`; SINAMA does not claim semantic coverage without an LLM judge.
+The evaluation scope is explicitly `deterministic_tool_contract`. Only structured expected/forbidden tool calls and exact argument constraints are scored. If a tool is absent, its argument constraints are not evaluated; a required tool produces one missing-tool root cause, while an optional tool remains allowed.
+
+Fixture `deterministic_checks` IDs are descriptive metadata, not executable evaluator configuration. Results expose them unchanged as `declared_checks` and, because the evaluator does not interpret or map ID text, as `unscored_declared_checks`. Even when an ID resembles a structured check, only the generated `checks` array proves what was scored. Natural-language outcomes and forbidden behaviors are returned as `unscored_expectations`; SINAMA does not claim semantic coverage without an LLM judge.
 
 `status: fail` means the agent completed execution but violated the deterministic scenario contract. `status: error` means execution could not be evaluated because of a timeout, malformed adapter response, adapter exception or max-turn violation. Error responses are typed and do not expose Python stack traces.
 

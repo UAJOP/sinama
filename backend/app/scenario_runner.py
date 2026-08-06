@@ -61,6 +61,8 @@ class ScenarioRunResult(StrictModel):
     severity: Severity | None = None
     evaluation_scope: Literal["deterministic_tool_contract"] = "deterministic_tool_contract"
     checks: list[EvaluationCheckResult] = Field(default_factory=list)
+    declared_checks: list[str] = Field(default_factory=list)
+    unscored_declared_checks: list[str] = Field(default_factory=list)
     transcript: list[TranscriptTurn] = Field(default_factory=list)
     tool_trace: list[ToolEvent] = Field(default_factory=list)
     turns_executed: int = Field(ge=0)
@@ -216,6 +218,8 @@ class ScenarioRunner:
             ),
             severity=report.severity,
             checks=report.checks,
+            declared_checks=report.declared_checks,
+            unscored_declared_checks=report.unscored_declared_checks,
             transcript=transcript,
             tool_trace=tool_trace,
             turns_executed=turns_executed,
@@ -240,6 +244,17 @@ class ScenarioRunner:
             transcript=transcript,
             tool_trace=tool_trace,
             turns_executed=turns_executed,
+            declared_checks=(
+                list(scenario.deterministic_checks) if scenario is not None else []
+            ),
+            unscored_declared_checks=(
+                list(scenario.deterministic_checks) if scenario is not None else []
+            ),
+            unscored_expectations=(
+                [*scenario.expected_outcomes, *scenario.forbidden_behaviors]
+                if scenario is not None
+                else []
+            ),
             error=ScenarioExecutionError(category=category, reason=reason),
         )
 

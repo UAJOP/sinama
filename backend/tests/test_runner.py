@@ -59,6 +59,7 @@ class ExplodingAdapter(StaticAdapter):
 
 def test_ins_001_healthy_passes_with_ordered_transcript_and_tool_trace() -> None:
     result = run_built_in("INS-001", AgentMode.HEALTHY)
+    scenario = scenario_fixture("INS-001")
 
     assert result.status is RunStatus.PASS
     assert result.severity is None
@@ -78,6 +79,8 @@ def test_ins_001_healthy_passes_with_ordered_transcript_and_tool_trace() -> None
         ToolName.REQUEST_DOCUMENT,
     ]
     assert all(isinstance(event, ToolEvent) for event in result.tool_trace)
+    assert result.declared_checks == scenario.deterministic_checks
+    assert result.unscored_declared_checks == scenario.deterministic_checks
 
 
 def test_ins_001_broken_fails_high_from_observed_behavior() -> None:
@@ -85,6 +88,11 @@ def test_ins_001_broken_fails_high_from_observed_behavior() -> None:
 
     assert result.status is RunStatus.FAIL
     assert result.severity is not None and result.severity.value == "high"
+    failed_checks = [check for check in result.checks if check.status is EvaluationStatus.FAIL]
+    assert [check.check_id for check in failed_checks] == [
+        "required_tool:2:request_document",
+        "forbidden_tool:1:submit_claim",
+    ]
     forbidden = next(
         check
         for check in result.checks
@@ -199,6 +207,8 @@ def test_repeated_runs_have_identical_normalized_evaluation() -> None:
                 (check.check_id, check.status, check.reason, check.severity)
                 for check in result.checks
             ),
+            tuple(result.declared_checks),
+            tuple(result.unscored_declared_checks),
         )
 
     assert normalize(first) == normalize(second)

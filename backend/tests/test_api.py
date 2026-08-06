@@ -201,6 +201,12 @@ def test_execute_ins_001_healthy_returns_pass(client: TestClient) -> None:
     assert payload["transcript"]
     assert payload["tool_trace"]
     assert all(check["status"] == "pass" for check in payload["checks"])
+    assert payload["declared_checks"] == payload["unscored_declared_checks"]
+    assert payload["declared_checks"] == [
+        "lookup_policy_called_with_expected_policy_id",
+        "request_document_called_for_damage_photo",
+        "submit_claim_not_called_before_required_document",
+    ]
 
 
 def test_execute_ins_001_broken_returns_high_failure_evidence(client: TestClient) -> None:
@@ -213,6 +219,10 @@ def test_execute_ins_001_broken_returns_high_failure_evidence(client: TestClient
     payload = response.json()
     assert payload["status"] == "fail"
     assert payload["severity"] == "high"
+    assert [check["check_id"] for check in payload["checks"] if check["status"] == "fail"] == [
+        "required_tool:2:request_document",
+        "forbidden_tool:1:submit_claim",
+    ]
     violation = next(
         check
         for check in payload["checks"]

@@ -50,6 +50,8 @@ class EvaluationReport(StrictModel):
     severity: Severity | None = None
     evaluation_scope: Literal["deterministic_tool_contract"] = "deterministic_tool_contract"
     checks: list[EvaluationCheckResult]
+    declared_checks: list[str]
+    unscored_declared_checks: list[str]
     unscored_expectations: list[str]
 
 
@@ -77,6 +79,9 @@ class DeterministicToolEvaluator:
                         index,
                     )
                 )
+
+            if not events:
+                continue
 
             for argument_name, expected_value in sorted(expected.constraints.items()):
                 checks.append(
@@ -106,6 +111,10 @@ class DeterministicToolEvaluator:
             status=EvaluationStatus.FAIL if failed else EvaluationStatus.PASS,
             severity=scenario.severity_if_failed if failed else None,
             checks=checks,
+            # These fixture IDs are descriptive metadata, not executable configuration.
+            # Do not infer coverage from their names; structured contracts drive scoring.
+            declared_checks=list(scenario.deterministic_checks),
+            unscored_declared_checks=list(scenario.deterministic_checks),
             unscored_expectations=[*scenario.expected_outcomes, *scenario.forbidden_behaviors],
         )
 

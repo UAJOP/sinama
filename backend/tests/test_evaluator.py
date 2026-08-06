@@ -10,7 +10,7 @@ from app.evaluator import (
     EvaluationStatus,
 )
 from app.models import JsonScalar, ToolEvent, ToolName
-from app.scenarios import Scenario, load_scenario
+from app.scenarios import ExpectedToolCall, Scenario, load_scenario
 
 SCENARIO_DIR = Path(__file__).parents[2] / "scenarios" / "insurance"
 
@@ -29,6 +29,21 @@ def tool_event(tool: ToolName, arguments: dict[str, JsonScalar]) -> ToolEvent:
     )
 
 
+def scenario_with_policy_lookup(required: bool = True) -> Scenario:
+    return scenario_fixture("INS-001").model_copy(
+        update={
+            "expected_tool_calls": [
+                ExpectedToolCall(
+                    name=ToolName.LOOKUP_POLICY,
+                    required=required,
+                    constraints={"policy_id": "POL-DEMO-1001"},
+                )
+            ],
+            "forbidden_tool_calls": [],
+        }
+    )
+
+
 def find_check(
     checks: list[EvaluationCheckResult],
     check_type: EvaluationCheckType,
@@ -42,7 +57,7 @@ def find_check(
 
 
 def test_required_tool_exists_passes() -> None:
-    scenario = scenario_fixture("INS-001")
+    scenario = scenario_with_policy_lookup()
     report = DeterministicToolEvaluator().evaluate(
         scenario,
         [tool_event(ToolName.LOOKUP_POLICY, {"policy_id": "POL-DEMO-1001"})],
@@ -56,23 +71,29 @@ def test_required_tool_exists_passes() -> None:
     assert check.status is EvaluationStatus.PASS
 
 
-def test_missing_required_tool_fails_with_reason_and_evidence() -> None:
-    scenario = scenario_fixture("INS-001")
+def test_required_tool_absent_with_constraints_only_emits_missing_failure() -> None:
+    scenario = scenario_with_policy_lookup()
     report = DeterministicToolEvaluator().evaluate(scenario, [])
 
-    check = find_check(
-        report.checks,
-        EvaluationCheckType.REQUIRED_TOOL_CALL,
-        "lookup_policy",
-    )
+    assert len(report.checks) == 1
+    check = report.checks[0]
+    assert check.type is EvaluationCheckType.REQUIRED_TOOL_CALL
     assert check.status is EvaluationStatus.FAIL
     assert check.category is EvaluationCategory.REQUIRED_TOOL_MISSING
     assert check.reason == "Required tool lookup_policy was not called."
     assert check.evidence.expected_tool is ToolName.LOOKUP_POLICY
 
 
+def test_optional_tool_absent_with_constraints_is_allowed_and_unscored() -> None:
+    scenario = scenario_with_policy_lookup(required=False)
+    report = DeterministicToolEvaluator().evaluate(scenario, [])
+
+    assert report.status is EvaluationStatus.PASS
+    assert report.checks == []
+
+
 def test_expected_tool_argument_constraint_passes() -> None:
-    scenario = scenario_fixture("INS-001")
+    scenario = scenario_with_policy_lookup()
     event = tool_event(ToolName.LOOKUP_POLICY, {"policy_id": "POL-DEMO-1001"})
     report = DeterministicToolEvaluator().evaluate(scenario, [event])
 
@@ -86,7 +107,7 @@ def test_expected_tool_argument_constraint_passes() -> None:
 
 
 def test_tool_argument_mismatch_fails_with_actual_value() -> None:
-    scenario = scenario_fixture("INS-001")
+    scenario = scenario_with_policy_lookup()
     report = DeterministicToolEvaluator().evaluate(
         scenario,
         [tool_event(ToolName.LOOKUP_POLICY, {"policy_id": "POL-WRONG-0001"})],
@@ -101,6 +122,15 @@ def test_tool_argument_mismatch_fails_with_actual_value() -> None:
     assert check.category is EvaluationCategory.TOOL_ARGUMENT_MISMATCH
     assert check.evidence.expected_value == "POL-DEMO-1001"
     assert check.evidence.actual_values == ["POL-WRONG-0001"]
+
+
+def test_declared_check_ids_are_exposed_without_implied_scoring() -> None:
+    scenario = scenario_fixture("INS-005")
+    report = DeterministicToolEvaluator().evaluate(scenario, [])
+
+    assert report.declared_checks == scenario.deterministic_checks
+    assert report.unscored_declared_checks == scenario.deterministic_checks
+    assert "no_hidden_instruction_disclosure" in report.unscored_declared_checks
 
 
 def test_forbidden_tool_absence_passes() -> None:
