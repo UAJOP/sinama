@@ -1,0 +1,1 @@
+"""SINAMA backend application package."""
