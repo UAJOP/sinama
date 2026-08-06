@@ -8,6 +8,7 @@
 # Node / Next.js
 node_modules/
 .next/
+next-env.d.ts
 out/
 dist/
 .vercel/
@@ -21,6 +22,7 @@ pnpm-debug.log*
 __pycache__/
 *.py[cod]
 *.pyo
+*.egg-info/
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
