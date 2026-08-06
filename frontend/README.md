@@ -1,17 +1,27 @@
-# Frontend
+# SINAMA Frontend
 
-Target: **Next.js + React + TypeScript**.
+Next.js App Router interface for the Demo Agent Playground.
 
-This directory is intentionally documentation-only until the implementation scaffold is generated.
+## Run locally
 
-Initial frontend responsibilities:
+Start the FastAPI backend on port `8000`, then:
 
-- dashboard shell
-- scenario-pack selection
-- start test run
-- run progress/status
-- run summary
-- transcript and tool-call inspection
-- later: regression comparison
+```powershell
+Copy-Item .env.example .env.local
+pnpm install
+pnpm dev
+```
 
-Keep secrets server-side. The browser should only receive public configuration such as the backend base URL.
+Open `http://localhost:3000`.
+
+`NEXT_PUBLIC_API_BASE_URL` is the only frontend setting. It is public by design and defaults to `http://localhost:8000`; do not place tokens or credentials in any `NEXT_PUBLIC_*` variable.
+
+## Quality
+
+```powershell
+pnpm lint
+pnpm typecheck
+pnpm build
+```
+
+The mode control starts a new isolated backend conversation. Reset clears transcript, trace and claim state while retaining the selected mode.

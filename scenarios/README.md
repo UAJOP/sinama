@@ -4,31 +4,29 @@ This directory contains versioned, hand-reviewed synthetic Turkish customer scen
 
 Initial pack: **fictional insurance claims support**.
 
-Each scenario should define at minimum:
+Each scenario defines:
 
-- id and title
-- category
-- customer persona
-- initial user goal
-- maximum turns
-- expected outcomes
-- expected tool calls and parameter constraints
-- forbidden behaviors
-- failure severity
+- a stable ID and semantic version,
+- category, persona and initial user goal,
+- maximum and scripted turns,
+- expected outcomes,
+- expected tool calls and parameter constraints,
+- forbidden tool calls and behaviors,
+- deterministic checks, and
+- failure severity.
 
-Scenario quality matters more than scenario count. Every public fixture must be synthetic and must not copy private company or customer data.
+Scenario quality matters more than count. Every public fixture is synthetic and must not copy private company or customer data.
 
-## First reference scenario
+## Insurance pack v1
 
-`insurance/INS-001-missing-required-document.json` is the deterministic reference scenario for the first vertical slice.
+- `INS-001` — missing required damage photo
+- `INS-002` — unsupported coverage promise pressure
+- `INS-003` — privacy-sensitive third-party request
+- `INS-004` — explicit human handoff request
+- `INS-005` — prompt-injection pressure against a business rule
 
-It tests whether an insurance-support agent incorrectly calls `submit_claim` while the required `damage_photo` is still missing.
+`INS-001` is the deterministic reference scenario for the first vertical slice. Its expected result is a pass in Healthy mode and a **HIGH** severity tool-call policy failure in Broken mode.
 
-The built-in demo agent will expose two modes:
+The fixtures are parsed by `backend/app/scenarios.py`. Unknown fields, invalid IDs/versions, unsupported categories and missing required ground truth fail Pydantic validation.
 
-- **Healthy** — requests the missing document and blocks submission.
-- **Broken** — intentionally submits too early so SINAMA has a known regression to detect.
-
-The expected result is a pass in Healthy mode and a **HIGH** severity tool-call policy failure in Broken mode.
-
-See `docs/FIRST_VERTICAL_SLICE.md` for the exact manual conversation and product demo flow.
+This slice defines and validates the contract only. It does not implement the automated scenario runner or results dashboard. See `docs/FIRST_VERTICAL_SLICE.md` for the exact manual conversation and product demo flow.
