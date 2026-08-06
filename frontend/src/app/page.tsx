@@ -148,12 +148,9 @@ export default function Home() {
   return (
     <main className="app-shell">
       <header className="topbar">
-        <div className="brand-block">
-          <div className="brand-mark" aria-hidden="true">S</div>
-          <div>
-            <p className="eyebrow">AI AGENT RELIABILITY LAB</p>
-            <h1>SINAMA</h1>
-          </div>
+        <div>
+          <p className="eyebrow">MANUAL TESTING</p>
+          <h1>Demo Agent Playground</h1>
         </div>
         <div className="built-in-badge">
           <span className="status-dot" aria-hidden="true" />

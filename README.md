@@ -2,7 +2,7 @@
 
 **Turkish-first AI Agent Reliability Lab**
 
-SINAMA is a developer-focused platform for testing Turkish customer-service AI agents before production. The current vertical slice includes a deterministic fictional insurance agent, a manual playground and an automated scenario runner with inspectable tool-contract evaluation.
+SINAMA is a developer-focused platform for testing Turkish customer-service AI agents before production. The current vertical slice includes a deterministic fictional insurance agent, a manual playground, an automated scenario runner and an inspectable results dashboard.
 
 > A controllable crash-test target for agent reliability work.
 
@@ -16,14 +16,14 @@ The Demo Agent Playground lets a developer:
 - reset state between tests, and
 - reproduce `INS-001` without an LLM, external insurer service, database or API key.
 
-The automated runner can execute the same repository-backed scenario against either demo mode, preserve its ordered transcript and structured tool trace, and return deterministic checks with machine-readable evidence.
+The **Test Runs** dashboard executes the stable five-scenario `insurance-v1` pack against either demo mode. It reports live lifecycle progress, observed pass/fail/error aggregates and scenario-level checks, transcript, tool trace and declared/unscored coverage metadata.
 
 The broken mode is intentional. It submits a synthetic claim before the required `damage_photo` exists so a later SINAMA evaluator has a stable regression to detect.
 
 ## Architecture
 
 ```text
-Next.js Demo Agent Playground
+Next.js Playground + Test Runs Dashboard
             |
             v
       FastAPI API -----------------------+
@@ -36,9 +36,11 @@ Deterministic Demo Agent      Async Scenario Runner
                                transcript + ToolEvent[]
                                       |
                             Deterministic Tool Evaluator
+                                      |
+                           Bounded In-Memory Run Store
 ```
 
-State is stored in memory and isolated by conversation ID. Restarting the backend clears all conversations. Scenario fixtures and run results are typed Pydantic models; run history is not persisted.
+State is stored in memory. Conversations are isolated by conversation ID, while completed test runs are retained in a bounded store of the latest 20 terminal records. Restarting the backend clears conversations and test runs. Scenario fixtures and run results are typed Pydantic models; no run history is persisted to a database.
 
 ## Requirements
 
@@ -73,7 +75,26 @@ pnpm install
 pnpm dev
 ```
 
-On macOS/Linux, use `cp .env.example .env.local`. Open `http://localhost:3000`. `NEXT_PUBLIC_API_BASE_URL` is a public browser setting and defaults to `http://localhost:8000`; it must never contain a secret.
+On macOS/Linux, use `cp .env.example .env.local`. Open `http://localhost:3000` for the manual playground or `http://localhost:3000/runs` for automated test runs. `NEXT_PUBLIC_API_BASE_URL` is a public browser setting and defaults to `http://localhost:8000`; it must never contain a secret.
+
+## Automated test runs
+
+Open `/runs`, select `Insurance Reliability Pack v1`, choose a mode and start the run. The browser creates the run once, then performs bounded, non-overlapping status polling until the backend reports a terminal lifecycle state.
+
+Expected built-in outcomes:
+
+- Healthy: **5 pass, 0 fail, 0 error**.
+- Broken: **3 pass, 2 fail, 0 error**. `INS-001` and `INS-005` expose the intentional premature `submit_claim` regression at HIGH severity.
+
+Run lifecycle (`queued`, `running`, `completed`, `error`) describes orchestration. Scenario outcome (`pass`, `fail`, `error`) describes each observed evaluation result. A completed run may therefore contain failed scenarios without being an orchestration error. Aggregates are computed only from stored observed results; progress separately reports how many scenarios have completed.
+
+Run API:
+
+- `GET /api/scenario-packs`
+- `POST /api/runs`
+- `GET /api/runs/{run_id}`
+- `GET /api/runs/{run_id}/results`
+- `GET /api/runs/{run_id}/results/{scenario_id}`
 
 ## Manual INS-001 test
 
@@ -143,7 +164,7 @@ pnpm build
 
 ## Current scope
 
-Implemented from issues #1, #2, #3, #4, #5 and #8:
+Implemented from issues #1, #2, #3, #4, #5, #6 and #8:
 
 - Next.js App Router frontend shell and responsive playground
 - FastAPI health and demo-conversation APIs
@@ -153,8 +174,11 @@ Implemented from issues #1, #2, #3, #4, #5 and #8:
 - async in-process scenario execution through a typed agent adapter
 - deterministic required/forbidden tool and argument evaluation with evidence
 - Swagger-accessible single-scenario execution
+- typed five-scenario pack and asynchronous run orchestration
+- bounded in-memory run summaries and scenario evidence APIs
+- responsive results dashboard with checks, transcript, tool trace and coverage views
 
-Current limitations: no results dashboard or run history (#6), persistence, semantic/LLM judge, external agent adapter, authentication, billing, distributed workers or release gate.
+Current limitations: no durable persistence, cross-run comparison, semantic/LLM judge, external agent adapter, authentication, billing, distributed workers or release gate.
 
 ## Documentation
 

@@ -70,7 +70,15 @@ Argument constraints run only when the corresponding tool event exists. A missin
 
 Fixture `deterministic_checks` IDs are declarative descriptions, not evaluator instructions. They are copied to `declared_checks` and `unscored_declared_checks`; the engine neither parses their names nor infers that an ID was executed. Actual coverage is represented only by checks generated from `expected_tool_calls`, their constraints and `forbidden_tool_calls`. Natural-language outcomes and forbidden behaviors are surfaced as `unscored_expectations` metadata.
 
-Agent-policy failures return `fail`; timeout, malformed response, adapter exception and max-turn failures return `error`. No run persistence or background worker exists in this slice.
+Agent-policy failures return `fail`; timeout, malformed response, adapter exception and max-turn failures return `error`.
+
+### Implemented run and inspection slice
+
+`ScenarioPackRegistry` defines the stable `insurance-v1` ordering (`INS-001` through `INS-005`) while deriving public metadata from the validated repository fixtures. `RunService` composes the existing runner rather than duplicating evaluation logic. It starts one in-process asyncio task per test run and executes pack scenarios sequentially.
+
+`RunStore` is typed, thread-safe and bounded to the latest 20 terminal records. It deep-copies stored/read results so API consumers cannot mutate evidence. Run lifecycle (`queued`, `running`, `completed`, `error`) is independent of scenario outcome (`pass`, `fail`, `error`). Aggregate pass/fail/error counts are derived only from results that have actually been observed; `completed_scenarios` provides progress against the pack total.
+
+The Next.js `/runs` route uses a client dashboard beneath the shared application layout. API types and requests remain centralized in `frontend/src/lib/api.ts`. Polling is sequential, abortable and bounded after repeated transport failures. Result detail is fetched separately from the summary list and exposes checks, transcript, tool trace and coverage metadata without treating unscored declarations as evaluated.
 
 ## Core domain objects
 
@@ -143,19 +151,19 @@ LLM judge output must be structured and include a short reason. Never treat one 
 
 Later target: PostgreSQL/Supabase.
 
-The current implementation uses repository-backed fixtures and returns typed run results without storing them. Persistence belongs to a later product step.
+The current implementation uses repository-backed fixtures plus a bounded single-process in-memory run store. It is intended for local/demo inspection only: the latest 20 terminal runs survive navigation but not a backend restart. Durable persistence belongs to a later product step.
 
-## API surface for first vertical slice
-
-Suggested endpoints:
+## Implemented API surface
 
 - `GET /health`
-- `GET /api/scenarios`
+- `GET /api/scenario-packs`
 - `POST /api/runs`
 - `GET /api/runs/{run_id}`
 - `GET /api/runs/{run_id}/results`
+- `GET /api/runs/{run_id}/results/{scenario_id}`
+- `POST /api/scenarios/{scenario_id}/execute`
 
-Do not expand the API until the first complete run works end to end.
+The run summary/result-detail split keeps list payloads compact while making full evidence inspectable on demand.
 
 ## Cost controls
 
