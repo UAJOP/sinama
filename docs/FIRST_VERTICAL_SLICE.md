@@ -130,3 +130,13 @@ The vertical slice is proven when Kaan can:
 6. receive a HIGH-severity deterministic failure with tool-call evidence.
 
 At that point the core product hypothesis is demonstrated without any paid AI dependency.
+
+## Automated proof
+
+With the backend running, open `http://localhost:8000/docs` and call `POST /api/scenarios/INS-001/execute`.
+
+- `{"agent_mode": "healthy"}` returns deterministic `pass` with an ordered transcript and structured tool trace.
+- `{"agent_mode": "broken_premature_submission"}` returns `fail` / `high`; the offending `submit_claim` evidence reports `status: premature` and `missing_requirement: damage_photo`.
+- `INS-004` with `{"agent_mode": "healthy"}` returns `pass` after validating `handoff_to_human(reason=customer_request)` and the absence of `submit_claim`.
+
+This proof evaluates actual tool behavior and never uses the Healthy/Broken label as a scoring input. Semantic requirements remain outside the declared `deterministic_tool_contract` scope, and runs are not persisted.

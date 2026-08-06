@@ -1,6 +1,6 @@
 # SINAMA Backend
 
-FastAPI service for the built-in deterministic Demo Insurance Agent.
+FastAPI service for the built-in deterministic Demo Insurance Agent and automated scenario runner.
 
 ## Run locally
 
@@ -24,8 +24,11 @@ SINAMA_CORS_ORIGINS=http://localhost:3000
 - `POST /api/demo-agent/conversations`
 - `POST /api/demo-agent/conversations/{conversation_id}/messages`
 - `POST /api/demo-agent/conversations/{conversation_id}/reset`
+- `POST /api/scenarios/{scenario_id}/execute`
 
 Create payload modes are `healthy` and `broken_premature_submission`. Mode is immutable for a conversation; create a new conversation to switch modes. Conversation data is in memory and is cleared when the process restarts.
+
+Execute `INS-001` from Swagger with `{"agent_mode": "healthy"}` or `{"agent_mode": "broken_premature_submission"}`. Runs are synchronous from the caller's perspective, in-process and not persisted. Results distinguish deterministic agent-policy failures from execution errors and include transcript, structured tool trace, individual checks and evidence.
 
 ## Quality
 

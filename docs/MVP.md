@@ -13,13 +13,13 @@
 
 Goal: one end-to-end test run with no paid API dependency.
 
-- [ ] FastAPI health endpoint
-- [ ] Next.js dashboard shell
-- [ ] mock insurance agent endpoint
-- [ ] scenario schema
-- [ ] 5 hand-reviewed Turkish scenarios
-- [ ] scenario runner
-- [ ] deterministic pass/fail evaluators
+- [x] FastAPI health endpoint
+- [x] Next.js dashboard shell
+- [x] mock insurance agent endpoint
+- [x] scenario schema
+- [x] 5 hand-reviewed Turkish scenarios
+- [x] scenario runner
+- [x] deterministic pass/fail evaluators
 - [ ] run detail view with transcript and tool trace
 
 Definition of done:

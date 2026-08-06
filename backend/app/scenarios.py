@@ -8,6 +8,7 @@ from app.models import StrictModel, ToolName
 
 StableScenarioId = Annotated[str, StringConstraints(pattern=r"^INS-[0-9]{3}$")]
 SemanticVersion = Annotated[str, StringConstraints(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$")]
+SCENARIO_DIRECTORY = Path(__file__).parents[2] / "scenarios" / "insurance"
 
 
 class Severity(StrEnum):
@@ -82,3 +83,17 @@ def load_scenario(path: Path) -> Scenario:
     """Load one repository fixture and fail closed on malformed JSON/schema."""
 
     return Scenario.model_validate_json(path.read_text(encoding="utf-8"))
+
+
+class ScenarioNotFoundError(LookupError):
+    pass
+
+
+def load_scenario_by_id(scenario_id: str) -> Scenario:
+    """Resolve a fixture by validated content instead of interpolating a user path."""
+
+    for path in sorted(SCENARIO_DIRECTORY.glob("INS-*.json")):
+        scenario = load_scenario(path)
+        if scenario.id == scenario_id:
+            return scenario
+    raise ScenarioNotFoundError(scenario_id)

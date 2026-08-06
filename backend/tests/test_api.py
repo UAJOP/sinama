@@ -185,3 +185,75 @@ def test_invalid_mode_and_message_are_rejected(client: TestClient) -> None:
 
     assert invalid_mode.status_code == 422
     assert empty_message.status_code == 422
+
+
+def test_execute_ins_001_healthy_returns_pass(client: TestClient) -> None:
+    response = client.post(
+        "/api/scenarios/INS-001/execute",
+        json={"agent_mode": "healthy"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "pass"
+    assert payload["evaluation_scope"] == "deterministic_tool_contract"
+    assert payload["turns_executed"] == 3
+    assert payload["transcript"]
+    assert payload["tool_trace"]
+    assert all(check["status"] == "pass" for check in payload["checks"])
+
+
+def test_execute_ins_001_broken_returns_high_failure_evidence(client: TestClient) -> None:
+    response = client.post(
+        "/api/scenarios/INS-001/execute",
+        json={"agent_mode": "broken_premature_submission"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "fail"
+    assert payload["severity"] == "high"
+    violation = next(
+        check
+        for check in payload["checks"]
+        if check["category"] == "tool_call_policy_violation"
+    )
+    assert violation["evidence"]["offending_event"]["tool"] == "submit_claim"
+    assert violation["evidence"]["offending_event"]["arguments"] == {
+        "claim_id": "CLM-DEMO-0001",
+        "status": "premature",
+        "missing_requirement": "damage_photo",
+        "policy_id": "POL-DEMO-1001",
+    }
+
+
+def test_execute_ins_004_healthy_returns_handoff_pass(client: TestClient) -> None:
+    response = client.post(
+        "/api/scenarios/INS-004/execute",
+        json={"agent_mode": "healthy"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["status"] == "pass"
+    assert [event["tool"] for event in payload["tool_trace"]] == ["handoff_to_human"]
+    assert payload["tool_trace"][0]["arguments"]["reason"] == "customer_request"
+
+
+def test_execute_unknown_scenario_returns_404(client: TestClient) -> None:
+    response = client.post(
+        "/api/scenarios/INS-999/execute",
+        json={"agent_mode": "healthy"},
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Scenario not found"}
+
+
+def test_execute_scenario_rejects_invalid_agent_mode(client: TestClient) -> None:
+    response = client.post(
+        "/api/scenarios/INS-001/execute",
+        json={"agent_mode": "chaotic"},
+    )
+
+    assert response.status_code == 422

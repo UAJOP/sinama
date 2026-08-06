@@ -53,6 +53,21 @@ FastAPI owns all privileged operations:
 
 Initial execution can run in-process with async Python. Do not add Redis/Celery until a real workload requires a queue.
 
+### Implemented scenario execution slice
+
+The current runner is async and in-process. It depends on an `AgentAdapter` protocol rather than the built-in agent service, applies a configurable timeout to every adapter turn and stops at the fixture's `max_turns` boundary. `BuiltInDemoAgentAdapter` is the only implementation in this milestone.
+
+Each run returns an ordered user/assistant transcript, the original structured `ToolEvent` trace and deterministic check results. The evaluator receives only the scenario contract and observed trace; agent mode and configuration labels are metadata and cannot influence scoring.
+
+The implemented evaluation scope is `deterministic_tool_contract`:
+
+- required tool presence,
+- exact expected tool arguments,
+- forbidden tool absence, and
+- explicit handoff tool/argument contracts.
+
+Natural-language outcomes and forbidden behaviors are surfaced as unscored metadata. Agent-policy failures return `fail`; timeout, malformed response, adapter exception and max-turn failures return `error`. No run persistence or background worker exists in this slice.
+
 ## Core domain objects
 
 ### AgentConfig
@@ -122,9 +137,9 @@ LLM judge output must be structured and include a short reason. Never treat one 
 
 ## Persistence
 
-MVP target: PostgreSQL/Supabase.
+Later target: PostgreSQL/Supabase.
 
-The implementation may begin with repository-backed fixtures for scenarios, but run/result data should be modeled so it can move into PostgreSQL without redesigning the domain.
+The current implementation uses repository-backed fixtures and returns typed run results without storing them. Persistence belongs to a later product step.
 
 ## API surface for first vertical slice
 

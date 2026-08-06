@@ -3,19 +3,25 @@ from uuid import UUID
 from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.agent_adapters import BuiltInDemoAgentAdapter
 from app.config import get_settings
 from app.demo_agent import ConversationNotFoundError, demo_agent_service
 from app.models import (
     ConversationResponse,
     CreateConversationRequest,
+    ExecuteScenarioRequest,
     HealthResponse,
     SendMessageRequest,
 )
+from app.scenario_runner import ScenarioRunResult, scenario_runner
+from app.scenarios import ScenarioNotFoundError, load_scenario_by_id
 
 settings = get_settings()
 app = FastAPI(
     title="SINAMA API",
-    description="Local API for the built-in deterministic Demo Insurance Agent.",
+    description=(
+        "Local API for the built-in Demo Insurance Agent and deterministic scenario runner."
+    ),
     version="0.1.0",
 )
 app.add_middleware(
@@ -67,3 +73,21 @@ def reset_conversation(conversation_id: UUID) -> ConversationResponse:
         return demo_agent_service.reset_conversation(conversation_id)
     except ConversationNotFoundError as error:
         raise HTTPException(status_code=404, detail="Conversation not found") from error
+
+
+@app.post(
+    "/api/scenarios/{scenario_id}/execute",
+    response_model=ScenarioRunResult,
+    tags=["scenarios"],
+)
+async def execute_scenario(
+    scenario_id: str,
+    request: ExecuteScenarioRequest,
+) -> ScenarioRunResult:
+    try:
+        scenario = load_scenario_by_id(scenario_id)
+    except ScenarioNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Scenario not found") from error
+
+    adapter = BuiltInDemoAgentAdapter(mode=request.agent_mode)
+    return await scenario_runner.run(scenario, adapter)

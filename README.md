@@ -2,11 +2,11 @@
 
 **Turkish-first AI Agent Reliability Lab**
 
-SINAMA is a developer-focused platform for testing Turkish customer-service AI agents before production. This repository currently contains the first manually testable vertical slice: a deterministic, fictional insurance agent with a known-good and known-bad mode.
+SINAMA is a developer-focused platform for testing Turkish customer-service AI agents before production. The current vertical slice includes a deterministic fictional insurance agent, a manual playground and an automated scenario runner with inspectable tool-contract evaluation.
 
 > A controllable crash-test target for agent reliability work.
 
-## First usable slice
+## Current usable slice
 
 The Demo Agent Playground lets a developer:
 
@@ -16,6 +16,8 @@ The Demo Agent Playground lets a developer:
 - reset state between tests, and
 - reproduce `INS-001` without an LLM, external insurer service, database or API key.
 
+The automated runner can execute the same repository-backed scenario against either demo mode, preserve its ordered transcript and structured tool trace, and return deterministic checks with machine-readable evidence.
+
 The broken mode is intentional. It submits a synthetic claim before the required `damage_photo` exists so a later SINAMA evaluator has a stable regression to detect.
 
 ## Architecture
@@ -24,15 +26,19 @@ The broken mode is intentional. It submits a synthetic claim before the required
 Next.js Demo Agent Playground
             |
             v
-      FastAPI API
-            |
-            v
-Deterministic Demo Insurance Agent
-      |                 |
-conversation state   structured tool events
+      FastAPI API -----------------------+
+            |                            |
+            v                            v
+Deterministic Demo Agent      Async Scenario Runner
+                                      |
+                               AgentAdapter Protocol
+                                      |
+                               transcript + ToolEvent[]
+                                      |
+                            Deterministic Tool Evaluator
 ```
 
-State is stored in memory and isolated by conversation ID. Restarting the backend clears all conversations. Scenario fixtures are repository-backed JSON validated by typed Pydantic models; an automated scenario runner is deliberately not included in this slice.
+State is stored in memory and isolated by conversation ID. Restarting the backend clears all conversations. Scenario fixtures and run results are typed Pydantic models; run history is not persisted.
 
 ## Requirements
 
@@ -91,7 +97,29 @@ Expected Broken evidence:
 - `submit_claim` appears with `status: premature`, and
 - `missing_requirement` is `damage_photo`.
 
-This is a successful reproduction of the intentional regression. It is not an unexpected application/test failure; the future evaluator will classify the agent behavior itself as a HIGH-severity policy violation.
+This is a successful reproduction of the intentional regression. It is not an unexpected application/test failure; the deterministic evaluator classifies the agent behavior itself as a HIGH-severity policy violation.
+
+## Automated scenario execution
+
+Start the backend, open `http://localhost:8000/docs`, select `POST /api/scenarios/{scenario_id}/execute`, use `INS-001`, and submit one of these bodies:
+
+```json
+{"agent_mode": "healthy"}
+```
+
+```json
+{"agent_mode": "broken_premature_submission"}
+```
+
+Expected results:
+
+- Healthy returns `status: pass`; required `lookup_policy` and `request_document` calls and their arguments pass, while forbidden `submit_claim` is absent.
+- Broken returns `status: fail`, `severity: high`; the failed `tool_call_policy_violation` check contains the observed premature `submit_claim` event and `missing_requirement: damage_photo`.
+- `INS-004` with Healthy returns `status: pass` after observing `handoff_to_human` with `reason: customer_request` and no `submit_claim`.
+
+The evaluation scope is explicitly `deterministic_tool_contract`. Only structured expected/forbidden tool calls and exact argument constraints are scored. Natural-language outcomes and forbidden behaviors are returned as `unscored_expectations`; SINAMA does not claim semantic coverage without an LLM judge.
+
+`status: fail` means the agent completed execution but violated the deterministic scenario contract. `status: error` means execution could not be evaluated because of a timeout, malformed adapter response, adapter exception or max-turn violation. Error responses are typed and do not expose Python stack traces.
 
 ## Quality commands
 
@@ -113,15 +141,18 @@ pnpm build
 
 ## Current scope
 
-Implemented from issues #1, #2, #3, #4 and #8:
+Implemented from issues #1, #2, #3, #4, #5 and #8:
 
 - Next.js App Router frontend shell and responsive playground
 - FastAPI health and demo-conversation APIs
 - deterministic insurance state machine and structured tool contract
 - five synthetic Turkish insurance scenarios with strict schema validation
 - automated backend contract and regression tests
+- async in-process scenario execution through a typed agent adapter
+- deterministic required/forbidden tool and argument evaluation with evidence
+- Swagger-accessible single-scenario execution
 
-Not implemented yet: scenario runner (#5), automated results dashboard (#6), persistence, Supabase, authentication, billing, external agents or LLM providers.
+Current limitations: no results dashboard or run history (#6), persistence, semantic/LLM judge, external agent adapter, authentication, billing, distributed workers or release gate.
 
 ## Documentation
 

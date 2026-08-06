@@ -59,6 +59,10 @@ class CreateConversationRequest(StrictModel):
     mode: AgentMode = AgentMode.HEALTHY
 
 
+class ExecuteScenarioRequest(StrictModel):
+    agent_mode: AgentMode = AgentMode.HEALTHY
+
+
 class SendMessageRequest(StrictModel):
     message: NonEmptyMessage
 
