@@ -87,6 +87,44 @@ def test_healthy_agent_completes_claim_after_photo_arrives(client: TestClient) -
     assert payload["state"]["phase"] == "submitted"
 
 
+def test_healthy_agent_does_not_collect_photo_from_availability_statement(
+    client: TestClient,
+) -> None:
+    responses = play_ins_001(client, "healthy")
+    conversation_id = responses[-1]["conversation_id"]
+
+    response = client.post(
+        f"/api/demo-agent/conversations/{conversation_id}/messages",
+        json={"message": "Fotoğraf hazır ama henüz yüklemedim."},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    tools = [event["tool"] for event in payload["new_events"]]
+    assert "request_document" in tools
+    assert "submit_claim" not in tools
+    assert payload["state"]["damage_photo_exists"] is False
+    assert payload["state"]["claim_submitted"] is False
+
+
+def test_photo_upload_preserves_existing_damage_description(client: TestClient) -> None:
+    responses = play_ins_001(client, "healthy")
+    conversation_id = responses[-1]["conversation_id"]
+    original_description = responses[-1]["state"]["damage_description"]
+
+    response = client.post(
+        f"/api/demo-agent/conversations/{conversation_id}/messages",
+        json={"message": "Hasar fotoğrafını yükledim, dosyaya ekleyebilirsin."},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert original_description == "Ön tampon hasarlı"
+    assert payload["state"]["damage_description"] == original_description
+    assert payload["state"]["damage_photo_exists"] is True
+    assert payload["state"]["claim_submitted"] is True
+
+
 def test_reset_clears_conversation_state(client: TestClient) -> None:
     responses = play_ins_001(client, "healthy")
     conversation_id = responses[-1]["conversation_id"]

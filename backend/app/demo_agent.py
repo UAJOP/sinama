@@ -153,7 +153,10 @@ class DemoAgentService:
         photo_exists = self._message_has_photo(message)
         description = self._extract_damage_description(message)
 
-        if description:
+        if description and (
+            state.damage_description is None
+            or len(description) > len(state.damage_description)
+        ):
             state.damage_description = description
         state.damage_photo_exists = state.damage_photo_exists or photo_exists
 
@@ -221,8 +224,18 @@ class DemoAgentService:
     @staticmethod
     def _message_has_photo(message: str) -> bool:
         normalized = message.casefold()
-        negative_terms = ("yok", "değil", "olmadan", "bulunmuyor")
-        positive_terms = ("yükledim", "ekledim", "hazır", "gönderiyorum", "paylaşıyorum", "var")
+        negative_terms = (
+            "yok",
+            "değil",
+            "olmadan",
+            "bulunmuyor",
+            "henüz",
+            "yüklemedim",
+            "eklemedim",
+            "göndermedim",
+            "paylaşmadım",
+        )
+        positive_terms = ("yükledim", "ekledim", "gönderiyorum", "paylaşıyorum")
         mentions_photo = "fotoğraf" in normalized or "damage_photo" in normalized
         return (
             mentions_photo
@@ -232,8 +245,27 @@ class DemoAgentService:
 
     @staticmethod
     def _extract_damage_description(message: str) -> str | None:
-        first_sentence = re.split(r"(?i)fotoğraf", message, maxsplit=1)[0].strip(" .")
-        return first_sentence or None
+        candidate = re.split(r"(?i)fotoğraf", message, maxsplit=1)[0].strip(" .")
+        normalized = candidate.casefold()
+        damage_terms = (
+            "hasar",
+            "hasarlı",
+            "kırık",
+            "kırıldı",
+            "çatlak",
+            "çizik",
+            "ezik",
+            "çöktü",
+            "tampon",
+            "kapı",
+            "cam",
+            "far",
+            "çamurluk",
+        )
+        words = re.findall(r"\w+", normalized)
+        if len(words) < 2 or not any(term in normalized for term in damage_terms):
+            return None
+        return candidate
 
     @staticmethod
     def _event(tool: ToolName, arguments: dict[str, str | int | float | bool | None]) -> ToolEvent:

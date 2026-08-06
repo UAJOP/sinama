@@ -92,6 +92,8 @@ export default function Home() {
     event.preventDefault();
     const content = draft.trim();
     if (!content || !conversationId || isLoading) return;
+    const activeConversationId = conversationId;
+    const serial = ++requestSerial.current;
 
     setDraft("");
     setError(null);
@@ -99,15 +101,27 @@ export default function Home() {
     setMessages((current) => [...current, message("user", content)]);
 
     try {
-      const response = await sendConversationMessage(conversationId, content);
+      const response = await sendConversationMessage(activeConversationId, content);
+      if (
+        serial !== requestSerial.current ||
+        response.conversation_id !== activeConversationId
+      ) return;
       setConversationState(response.state);
       setEvents((current) => [...current, ...response.new_events]);
       setMessages((current) => [...current, message("assistant", response.assistant_message)]);
     } catch (cause) {
+      if (serial !== requestSerial.current) return;
       setError(cause instanceof Error ? cause.message : "Mesaj gönderilemedi.");
     } finally {
-      setIsLoading(false);
+      if (serial === requestSerial.current) setIsLoading(false);
     }
+  }
+
+  function handleModeChange(selectedMode: AgentMode) {
+    if (isLoading || selectedMode === mode) return;
+    ++requestSerial.current;
+    setIsLoading(true);
+    setMode(selectedMode);
   }
 
   async function handleReset() {
@@ -159,8 +173,8 @@ export default function Home() {
               key={option}
               type="button"
               aria-pressed={option === mode}
-              disabled={isLoading && option === mode}
-              onClick={() => setMode(option)}
+              disabled={isLoading}
+              onClick={() => handleModeChange(option)}
             >
               <span aria-hidden="true">{option === "healthy" ? "✓" : "⚠"}</span>
               {MODE_LABELS[option]}
