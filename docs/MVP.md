@@ -7,7 +7,7 @@
 - [x] Define repository structure
 - [x] Add safe environment-variable template
 - [x] Create development branch
-- [ ] Scaffold frontend and backend applications
+- [x] Scaffold frontend and backend applications
 
 ## Milestone 1 — First vertical slice
 
@@ -20,7 +20,7 @@ Goal: one end-to-end test run with no paid API dependency.
 - [x] 5 hand-reviewed Turkish scenarios
 - [x] scenario runner
 - [x] deterministic pass/fail evaluators
-- [ ] run detail view with transcript and tool trace
+- [x] run detail view with transcript and tool trace
 
 Definition of done:
 
@@ -33,8 +33,8 @@ A developer can run the project locally, execute the five demo scenarios against
 - [ ] handoff evaluator
 - [ ] prompt-injection / policy scenarios
 - [ ] JSON/tool parameter validation
-- [ ] run summary metrics
-- [ ] severity classification
+- [x] run summary metrics
+- [x] severity classification
 
 ## Milestone 3 — Regression testing
 
