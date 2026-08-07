@@ -1,5 +1,4 @@
 from datetime import UTC, datetime
-from pathlib import Path
 from uuid import uuid4
 
 from app.evaluator import (
@@ -10,14 +9,11 @@ from app.evaluator import (
     EvaluationStatus,
 )
 from app.models import JsonScalar, ToolEvent, ToolName
-from app.scenarios import ExpectedToolCall, Scenario, load_scenario
-
-SCENARIO_DIR = Path(__file__).parents[2] / "scenarios" / "insurance"
+from app.scenarios import ExpectedToolCall, Scenario, load_scenario_by_id
 
 
 def scenario_fixture(scenario_id: str) -> Scenario:
-    path = next(SCENARIO_DIR.glob(f"{scenario_id}-*.json"))
-    return load_scenario(path)
+    return load_scenario_by_id(scenario_id)
 
 
 def tool_event(tool: ToolName, arguments: dict[str, JsonScalar]) -> ToolEvent:

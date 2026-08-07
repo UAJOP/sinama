@@ -8,7 +8,7 @@ from app.models import StrictModel, ToolName
 
 StableScenarioId = Annotated[str, StringConstraints(pattern=r"^INS-[0-9]{3}$")]
 SemanticVersion = Annotated[str, StringConstraints(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$")]
-SCENARIO_DIRECTORY = Path(__file__).parents[2] / "scenarios" / "insurance"
+SCENARIO_DIRECTORY = Path(__file__).resolve().parent / "scenario_data" / "insurance"
 
 
 class Severity(StrEnum):
@@ -80,7 +80,7 @@ class Scenario(StrictModel):
 
 
 def load_scenario(path: Path) -> Scenario:
-    """Load one repository fixture and fail closed on malformed JSON/schema."""
+    """Load one packaged fixture and fail closed on malformed JSON/schema."""
 
     return Scenario.model_validate_json(path.read_text(encoding="utf-8"))
 

@@ -4,13 +4,13 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from app.scenarios import load_scenario
+from app.scenarios import SCENARIO_DIRECTORY, load_scenario
 
-SCENARIO_DIR = Path(__file__).parents[2] / "scenarios" / "insurance"
+BACKEND_ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_valid_scenario_fixtures_parse() -> None:
-    fixtures = sorted(SCENARIO_DIR.glob("INS-*.json"))
+    fixtures = sorted(SCENARIO_DIRECTORY.glob("INS-*.json"))
 
     assert len(fixtures) == 5
     scenarios = [load_scenario(path) for path in fixtures]
@@ -21,6 +21,7 @@ def test_valid_scenario_fixtures_parse() -> None:
         "INS-004",
         "INS-005",
     ]
+    assert SCENARIO_DIRECTORY.is_relative_to(BACKEND_ROOT)
 
 
 def test_malformed_scenario_fixture_fails_validation(tmp_path: Path) -> None:

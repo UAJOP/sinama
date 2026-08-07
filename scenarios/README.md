@@ -1,6 +1,7 @@
 # Scenarios
 
-This directory contains versioned, hand-reviewed synthetic Turkish customer scenarios.
+This directory documents the versioned, hand-reviewed synthetic Turkish customer scenarios.
+Runtime fixtures live in `backend/app/scenario_data/insurance` so they are included in the backend deployment and Python package.
 
 Initial pack: **fictional insurance claims support**.
 

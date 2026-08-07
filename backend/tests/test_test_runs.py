@@ -1,6 +1,7 @@
 import asyncio
 import time
 from collections.abc import Iterator
+from pathlib import Path
 from uuid import UUID, uuid4
 
 import pytest
@@ -231,6 +232,28 @@ def test_scenario_pack_api_returns_real_fixture_metadata(client: TestClient) -> 
         "INS-004",
         "INS-005",
     ]
+
+
+def test_all_pack_scenarios_load_with_backend_as_working_directory(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.chdir(Path(__file__).resolve().parents[1])
+
+    response = client.get("/api/scenario-packs")
+
+    assert response.status_code == 200
+    referenced_ids = [
+        scenario["scenario_id"]
+        for pack in response.json()
+        for scenario in pack["scenarios"]
+    ]
+    loaded_ids = [
+        scenario.id
+        for pack in response.json()
+        for scenario in ScenarioPackRegistry().load_scenarios(pack["id"])
+    ]
+    assert loaded_ids == referenced_ids
 
 
 @pytest.mark.parametrize("mode", ["healthy", "broken_premature_submission"])
