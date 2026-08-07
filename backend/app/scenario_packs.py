@@ -51,7 +51,7 @@ class ScenarioPackNotFoundError(LookupError):
 
 
 class ScenarioPackRegistry:
-    """Typed repository-backed pack metadata with stable scenario ordering."""
+    """Typed packaged scenario metadata with stable scenario ordering."""
 
     def __init__(
         self,

@@ -1,5 +1,4 @@
 import asyncio
-from pathlib import Path
 from typing import cast
 
 from app.agent_adapters import (
@@ -15,13 +14,11 @@ from app.scenario_runner import (
     ScenarioRunner,
     ScenarioRunResult,
 )
-from app.scenarios import Scenario, load_scenario
-
-SCENARIO_DIR = Path(__file__).parents[2] / "scenarios" / "insurance"
+from app.scenarios import Scenario, load_scenario_by_id
 
 
 def scenario_fixture(scenario_id: str) -> Scenario:
-    return load_scenario(next(SCENARIO_DIR.glob(f"{scenario_id}-*.json")))
+    return load_scenario_by_id(scenario_id)
 
 
 def run_built_in(scenario_id: str, mode: AgentMode, label: str | None = None):
