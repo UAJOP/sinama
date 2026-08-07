@@ -9,7 +9,10 @@ import {
   getTestRun,
   getTestRunResults,
   listScenarioPacks,
+  testExternalAgentConnection,
   type AgentMode,
+  type AgentTarget,
+  type ConnectionTestStatus,
   type EvaluationCheck,
   type JsonScalar,
   type RunLifecycleStatus,
@@ -26,6 +29,20 @@ import {
 import styles from "./runs.module.css";
 
 type DetailTab = "checks" | "transcript" | "trace" | "coverage";
+type ConnectionState = "idle" | "testing" | ConnectionTestStatus;
+
+const TARGET_OPTIONS: { value: AgentTarget; label: string; note: string }[] = [
+  {
+    value: "built_in_demo",
+    label: "Built-in Demo Agent",
+    note: "Deterministic local baseline",
+  },
+  {
+    value: "external_http",
+    label: "External HTTP Agent",
+    note: "Your secured turn endpoint",
+  },
+];
 
 const MODE_OPTIONS: { value: AgentMode; label: string; note: string }[] = [
   { value: "healthy", label: "Healthy", note: "Expected safe behavior" },
@@ -109,6 +126,11 @@ export function RunsDashboard() {
   const [pollRetry, setPollRetry] = useState(0);
   const [selectedPackId, setSelectedPackId] = useState("");
   const [selectedMode, setSelectedMode] = useState<AgentMode>("healthy");
+  const [agentTarget, setAgentTarget] = useState<AgentTarget>("built_in_demo");
+  const [endpointUrl, setEndpointUrl] = useState("");
+  const [bearerToken, setBearerToken] = useState("");
+  const [connectionState, setConnectionState] = useState<ConnectionState>("idle");
+  const [connectionMessage, setConnectionMessage] = useState<string | null>(null);
 
   const [run, setRun] = useState<TestRunSummary | null>(null);
   const [results, setResults] = useState<ScenarioResultSummary[]>([]);
@@ -125,6 +147,7 @@ export function RunsDashboard() {
   const pollSerial = useRef(0);
   const resultsSerial = useRef(0);
   const detailSerial = useRef(0);
+  const connectionSerial = useRef(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -155,9 +178,44 @@ export function RunsDashboard() {
   const terminalRunId =
     run && TERMINAL_STATUSES.includes(run.lifecycle_status) ? run.run_id : null;
   const activeRunId = run?.run_id ?? null;
+  const externalConnectionReady =
+    agentTarget === "built_in_demo" || connectionState === "success";
+
+  const resetConnectionFeedback = useCallback(() => {
+    ++connectionSerial.current;
+    setConnectionState("idle");
+    setConnectionMessage(null);
+  }, []);
+
+  const handleTestConnection = useCallback(async () => {
+    const normalizedEndpoint = endpointUrl.trim();
+    if (!normalizedEndpoint || connectionState === "testing" || runIsActive) return;
+
+    const serial = ++connectionSerial.current;
+    setConnectionState("testing");
+    setConnectionMessage("Testing the external turn contract…");
+
+    try {
+      const result = await testExternalAgentConnection({
+        endpoint_url: normalizedEndpoint,
+        ...(bearerToken ? { bearer_token: bearerToken } : {}),
+      });
+      if (serial !== connectionSerial.current) return;
+      setConnectionState(result.status);
+      setConnectionMessage(
+        result.http_status_code
+          ? `${result.message} HTTP ${result.http_status_code}.`
+          : result.message,
+      );
+    } catch (cause) {
+      if (serial !== connectionSerial.current) return;
+      setConnectionState("network_error");
+      setConnectionMessage(errorMessage(cause, "Connection test could not be completed."));
+    }
+  }, [bearerToken, connectionState, endpointUrl, runIsActive]);
 
   const handleCreateRun = useCallback(async () => {
-    if (!selectedPackId || isCreating || runIsActive) return;
+    if (!selectedPackId || isCreating || runIsActive || !externalConnectionReady) return;
     const serial = ++createSerial.current;
     ++pollSerial.current;
     ++resultsSerial.current;
@@ -172,16 +230,40 @@ export function RunsDashboard() {
     setActiveTab("checks");
 
     try {
-      const created = await createTestRun(selectedPackId, selectedMode);
+      const created = await createTestRun(
+        selectedPackId,
+        selectedMode,
+        agentTarget,
+        agentTarget === "external_http"
+          ? {
+              endpoint_url: endpointUrl.trim(),
+              ...(bearerToken ? { bearer_token: bearerToken } : {}),
+            }
+          : undefined,
+      );
       if (serial !== createSerial.current) return;
       setRun(created);
+      if (agentTarget === "external_http") {
+        setBearerToken("");
+        setConnectionState("idle");
+        setConnectionMessage("Connection credentials cleared after the run was accepted.");
+      }
     } catch (cause) {
       if (serial !== createSerial.current) return;
       setRunError(errorMessage(cause, "Test run could not be created."));
     } finally {
       if (serial === createSerial.current) setIsCreating(false);
     }
-  }, [isCreating, runIsActive, selectedMode, selectedPackId]);
+  }, [
+    agentTarget,
+    bearerToken,
+    endpointUrl,
+    externalConnectionReady,
+    isCreating,
+    runIsActive,
+    selectedMode,
+    selectedPackId,
+  ]);
 
   useEffect(() => {
     if (!run || TERMINAL_STATUSES.includes(run.lifecycle_status)) return;
@@ -282,7 +364,7 @@ export function RunsDashboard() {
         <div>
           <p className="eyebrow">AUTOMATED EVALUATION</p>
           <h1>Test Runs</h1>
-          <p>Run the built-in insurance pack and inspect deterministic evidence scenario by scenario.</p>
+          <p>Run the insurance pack against a built-in or external agent and inspect the same deterministic evidence.</p>
         </div>
         <span className={styles.storageNote}>IN-MEMORY · LAST 20 RUNS</span>
       </header>
@@ -329,16 +411,20 @@ export function RunsDashboard() {
             </label>
 
             <fieldset className={styles.modeField} disabled={isCreating || runIsActive}>
-              <legend>Agent mode</legend>
+              <legend>Agent target</legend>
               <div className={styles.modeOptions}>
-                {MODE_OPTIONS.map((option) => (
-                  <label className={selectedMode === option.value ? styles.modeSelected : ""} key={option.value}>
+                {TARGET_OPTIONS.map((option) => (
+                  <label className={agentTarget === option.value ? styles.modeSelected : ""} key={option.value}>
                     <input
                       type="radio"
-                      name="run-mode"
+                      name="agent-target"
                       value={option.value}
-                      checked={selectedMode === option.value}
-                      onChange={() => setSelectedMode(option.value)}
+                      checked={agentTarget === option.value}
+                      onChange={() => {
+                        setAgentTarget(option.value);
+                        if (option.value === "built_in_demo") setBearerToken("");
+                        resetConnectionFeedback();
+                      }}
                     />
                     <span><strong>{option.label}</strong><small>{option.note}</small></span>
                   </label>
@@ -350,11 +436,105 @@ export function RunsDashboard() {
               className={styles.runButton}
               type="button"
               onClick={() => void handleCreateRun()}
-              disabled={!selectedPackId || packsLoading || isCreating || runIsActive}
+              disabled={
+                !selectedPackId ||
+                packsLoading ||
+                isCreating ||
+                runIsActive ||
+                !externalConnectionReady
+              }
             >
               {isCreating ? "Starting…" : runIsActive ? "Run in progress" : "Run Test Pack"}
               <span aria-hidden="true">↗</span>
             </button>
+
+            <div className={styles.agentConfiguration}>
+              {agentTarget === "built_in_demo" ? (
+                <fieldset className={styles.modeField} disabled={isCreating || runIsActive}>
+                  <legend>Agent mode</legend>
+                  <div className={styles.modeOptions}>
+                    {MODE_OPTIONS.map((option) => (
+                      <label className={selectedMode === option.value ? styles.modeSelected : ""} key={option.value}>
+                        <input
+                          type="radio"
+                          name="run-mode"
+                          value={option.value}
+                          checked={selectedMode === option.value}
+                          onChange={() => setSelectedMode(option.value)}
+                        />
+                        <span><strong>{option.label}</strong><small>{option.note}</small></span>
+                      </label>
+                    ))}
+                  </div>
+                </fieldset>
+              ) : (
+                <div className={styles.externalConfiguration}>
+                  <label>
+                    <span>Endpoint URL</span>
+                    <input
+                      type="url"
+                      inputMode="url"
+                      placeholder="https://agent.example.com/turn"
+                      value={endpointUrl}
+                      onChange={(event) => {
+                        setEndpointUrl(event.target.value);
+                        resetConnectionFeedback();
+                      }}
+                      disabled={isCreating || runIsActive}
+                      required
+                    />
+                  </label>
+                  <label>
+                    <span>Optional bearer token</span>
+                    <input
+                      type="password"
+                      autoComplete="off"
+                      placeholder="Not stored"
+                      value={bearerToken}
+                      onChange={(event) => {
+                        setBearerToken(event.target.value);
+                        resetConnectionFeedback();
+                      }}
+                      disabled={isCreating || runIsActive}
+                    />
+                  </label>
+                  <button
+                    className={styles.connectionButton}
+                    type="button"
+                    onClick={() => void handleTestConnection()}
+                    disabled={
+                      !endpointUrl.trim() ||
+                      connectionState === "testing" ||
+                      isCreating ||
+                      runIsActive
+                    }
+                  >
+                    {connectionState === "testing" ? "Testing…" : "Test connection"}
+                  </button>
+                  {connectionMessage && (
+                    <p
+                      className={`${styles.connectionFeedback} ${
+                        connectionState === "success"
+                          ? styles.connectionSuccess
+                          : connectionState === "idle" || connectionState === "testing"
+                            ? ""
+                            : styles.connectionFailure
+                      }`}
+                      role={
+                        connectionState === "idle" ||
+                        connectionState === "success" ||
+                        connectionState === "testing"
+                          ? "status"
+                          : "alert"
+                      }
+                    >
+                      {connectionMessage}
+                    </p>
+                  )}
+                  <small>Bearer tokens stay only in this page&apos;s memory and are cleared after run creation.</small>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -441,8 +621,8 @@ function EmptyRunState() {
         <p className="eyebrow">NO RUN SELECTED</p>
         <h2>Evidence begins with a run.</h2>
         <p>
-          Choose Healthy for the expected baseline or Broken to surface the intentional
-          premature-submission regression.
+          Choose the deterministic demo baseline or connect an external HTTP agent using the same
+          scenario evidence workflow.
         </p>
         <ul className={styles.emptyFacts}>
           <li>5 synthetic Turkish scenarios</li>
@@ -499,7 +679,12 @@ function RunOverview({ run, progressPercent }: { run: TestRunSummary; progressPe
         ))}
       </div>
       <div className={styles.runMeta}>
-        <span>MODE <strong>{run.agent_mode === "healthy" ? "Healthy" : "Broken"}</strong></span>
+        <span>
+          TARGET <strong>{run.agent_target === "external_http" ? "External HTTP" : "Built-in Demo"}</strong>
+        </span>
+        {run.agent_target === "built_in_demo" && (
+          <span>MODE <strong>{run.agent_mode === "healthy" ? "Healthy" : "Broken"}</strong></span>
+        )}
         <span>PACK <strong>{run.pack_id}</strong></span>
         <span>OUTCOMES <strong>Observed results only</strong></span>
       </div>

@@ -105,6 +105,67 @@
 .modeOptions .modeSelected { border-color: #3c7b65; color: var(--green); background: #123126; }
 .modeOptions .modeSelected small { color: #b0c8c0; }
 .modeField:disabled label { cursor: not-allowed; opacity: 0.58; }
+.agentConfiguration {
+  grid-column: 1 / -1;
+  padding-top: 13px;
+  border-top: 1px solid #1d312b;
+}
+.agentConfiguration > .modeField { width: min(620px, 100%); }
+.externalConfiguration {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.3fr) minmax(220px, 0.9fr) 150px;
+  gap: 10px;
+  align-items: end;
+}
+.externalConfiguration label { display: grid; gap: 8px; }
+.externalConfiguration label > span {
+  color: #79948c;
+  font: 700 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.externalConfiguration input {
+  width: 100%;
+  min-height: 45px;
+  padding: 0 12px;
+  border: 1px solid #2a433c;
+  border-radius: 9px;
+  color: var(--text);
+  background: #07110f;
+  font-size: 11px;
+}
+.externalConfiguration input:focus { border-color: #4f9a7f; outline: 2px solid rgba(88, 239, 175, 0.12); }
+.externalConfiguration input:disabled { cursor: not-allowed; opacity: 0.58; }
+.connectionButton {
+  min-height: 45px;
+  border: 1px solid #3f745f;
+  border-radius: 9px;
+  color: #aee7d1;
+  background: #123126;
+  cursor: pointer;
+  font-size: 10px;
+  font-weight: 800;
+}
+.connectionButton:hover:not(:disabled) { border-color: var(--green); color: var(--green); }
+.connectionButton:disabled { border-color: #2a443b; color: #60766f; background: #172720; cursor: not-allowed; }
+.connectionFeedback {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 9px 11px;
+  border: 1px solid #334b44;
+  border-radius: 8px;
+  color: #91aaa2;
+  background: #0b1714;
+  font-size: 10px;
+}
+.connectionFeedback.connectionSuccess { border-color: #32664f; color: var(--green); background: #123025; }
+.connectionFeedback.connectionFailure { border-color: #713f3a; color: #e0aaa5; background: #2c1715; }
+.externalConfiguration > small {
+  grid-column: 1 / -1;
+  color: #607970;
+  font-size: 9px;
+  line-height: 1.5;
+}
 .runButton {
   display: flex;
   min-height: 49px;
@@ -303,6 +364,8 @@
 }
 
 @media (max-width: 800px) {
+  .externalConfiguration { grid-template-columns: 1fr 1fr; }
+  .connectionButton { grid-column: 1 / -1; }
   .inspectionGrid { grid-template-columns: 1fr; }
   .resultButtons { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .tabPanel { max-height: none; }
@@ -317,6 +380,8 @@
   .pageHeader { align-items: flex-start; flex-direction: column; gap: 12px; }
   .controlFields { grid-template-columns: 1fr; }
   .modeOptions { grid-template-columns: 1fr; }
+  .externalConfiguration { grid-template-columns: 1fr; }
+  .connectionButton { grid-column: auto; }
   .runButton { grid-column: auto; }
   .runControls { padding: 14px; }
   .aggregateGrid { grid-template-columns: repeat(2, 1fr); }

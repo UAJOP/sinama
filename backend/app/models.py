@@ -15,6 +15,11 @@ class AgentMode(StrEnum):
     BROKEN_PREMATURE_SUBMISSION = "broken_premature_submission"
 
 
+class AgentTarget(StrEnum):
+    BUILT_IN_DEMO = "built_in_demo"
+    EXTERNAL_HTTP = "external_http"
+
+
 class ConversationPhase(StrEnum):
     AWAITING_INTENT = "awaiting_intent"
     AWAITING_POLICY = "awaiting_policy"
