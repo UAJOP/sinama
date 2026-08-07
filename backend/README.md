@@ -78,7 +78,7 @@ Test the contract with `POST /api/agents/external/test-connection`, then create 
 }
 ```
 
-The bearer token is used only by the in-process run task and is never copied into the run store or result models. Production endpoints must use HTTPS. All environments reject localhost, non-public IP ranges, link-local/cloud-metadata destinations and DNS answers containing non-public addresses. Redirects are not followed, the total request deadline is at most five seconds and response bodies are streamed under a configurable one-megabyte hard ceiling.
+The bearer token is used only by the in-process run task and is never copied into the run store or result models. Production and Railway-hosted endpoints must use HTTPS. All environments reject localhost, non-public IP ranges, link-local/cloud-metadata destinations and DNS answers containing non-public addresses. Domain requests connect to an already validated address while preserving the original Host header and TLS SNI hostname. Redirects are not followed, environment proxies are ignored, the total request deadline is at most five seconds and response bodies are streamed under a configurable one-megabyte hard ceiling.
 
 Results distinguish deterministic agent-policy failures from execution errors and include transcript, structured tool trace, individual checks and evidence. Healthy produces 5 passes. Broken produces 3 passes and 2 HIGH-severity failures (`INS-001` and `INS-005`).
 

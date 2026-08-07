@@ -9,6 +9,10 @@ class Settings(BaseSettings):
 
     environment: str = "development"
     cors_origins: str = "http://localhost:3000"
+    railway_environment_name: str | None = Field(
+        default=None,
+        validation_alias="RAILWAY_ENVIRONMENT_NAME",
+    )
     external_agent_timeout_seconds: float = Field(default=4.0, gt=0, le=5.0)
     external_agent_max_response_bytes: int = Field(
         default=262_144,
@@ -28,7 +32,10 @@ class Settings(BaseSettings):
 
     @property
     def is_production(self) -> bool:
-        return self.environment.casefold() == "production"
+        return (
+            self.environment.casefold() == "production"
+            or self.railway_environment_name is not None
+        )
 
 
 @lru_cache

@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
+from app.config import Settings
 from app.http_agent import (
     ConnectionTestStatus,
     ExternalAgentHttpStatusError,
@@ -70,6 +71,33 @@ def test_http_adapter_sends_contract_and_normalizes_tool_events() -> None:
     assert len(turn.tool_events) == 1
     assert turn.tool_events[0].tool.value == "lookup_policy"
     assert turn.tool_events[0].arguments == {"policy_id": "POL-DEMO-1001"}
+
+
+def test_http_adapter_pins_validated_dns_address_and_preserves_host_and_sni() -> None:
+    captured: dict[str, object] = {}
+
+    async def public_resolver(_host: str, _port: int) -> Sequence[str]:
+        return ["93.184.216.34"]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["url"] = str(request.url)
+        captured["host"] = request.headers["Host"]
+        captured["sni_hostname"] = request.extensions.get("sni_hostname")
+        return httpx.Response(200, json={"message": "ready", "tool_events": []})
+
+    adapter = HttpAgentAdapter(
+        endpoint_url="https://agent.example.com:8443/turn?contract=v1",
+        resolver=public_resolver,
+        transport=httpx.MockTransport(handler),
+    )
+
+    asyncio.run(send_one_turn(adapter))
+
+    assert captured == {
+        "url": "https://93.184.216.34:8443/turn?contract=v1",
+        "host": "agent.example.com:8443",
+        "sni_hostname": "agent.example.com",
+    }
 
 
 def test_http_adapter_timeout_is_reported_by_connection_probe() -> None:
@@ -265,6 +293,15 @@ def test_production_requires_https_but_development_allows_public_http() -> None:
             production=False,
         )
     )
+
+
+def test_railway_runtime_is_treated_as_production(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("SINAMA_ENVIRONMENT", "development")
+    monkeypatch.setenv("RAILWAY_ENVIRONMENT_NAME", "production")
+
+    assert Settings().is_production is True
 
 
 def test_transport_exception_and_runner_logs_redact_authorization(

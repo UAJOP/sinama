@@ -116,6 +116,13 @@ class InvalidAgentSchemaError(MalformedAgentResponseError):
     """Raised when JSON does not match the external turn contract."""
 
 
+@dataclass(frozen=True)
+class ValidatedAgentEndpoint:
+    request_url: httpx.URL
+    host_header: str | None = None
+    sni_hostname: str | None = None
+
+
 async def resolve_host_addresses(host: str, port: int) -> Sequence[str]:
     def resolve() -> Sequence[str]:
         records = socket.getaddrinfo(host, port, type=socket.SOCK_STREAM)
@@ -137,7 +144,7 @@ async def validate_external_agent_endpoint(
     *,
     production: bool,
     resolver: AddressResolver = resolve_host_addresses,
-) -> None:
+) -> ValidatedAgentEndpoint:
     if any(character.isspace() for character in endpoint_url):
         raise UnsafeAgentEndpointError("External agent endpoint is not allowed.")
 
@@ -157,6 +164,11 @@ async def validate_external_agent_endpoint(
     if parsed.username is not None or parsed.password is not None or parsed.fragment:
         raise UnsafeAgentEndpointError("External agent endpoint is not allowed.")
 
+    try:
+        normalized_url = httpx.URL(endpoint_url)
+    except (httpx.InvalidURL, UnicodeError):
+        raise UnsafeAgentEndpointError("External agent endpoint is not allowed.") from None
+
     host = parsed.hostname
     if host is None:
         raise UnsafeAgentEndpointError("External agent endpoint is not allowed.")
@@ -175,7 +187,7 @@ async def validate_external_agent_endpoint(
     if literal_address is not None:
         if not literal_address.is_global:
             raise UnsafeAgentEndpointError("External agent endpoint is not allowed.")
-        return
+        return ValidatedAgentEndpoint(request_url=normalized_url)
 
     try:
         addresses = await resolver(normalized_host, port or (443 if scheme == "https" else 80))
@@ -185,6 +197,14 @@ async def validate_external_agent_endpoint(
         ) from None
     if not addresses or any(not _is_public_address(address) for address in addresses):
         raise UnsafeAgentEndpointError("External agent endpoint is not allowed.")
+
+    resolved_address = str(ipaddress.ip_address(addresses[0]))
+    original_host = normalized_url.raw_host.decode("ascii")
+    return ValidatedAgentEndpoint(
+        request_url=normalized_url.copy_with(host=resolved_address),
+        host_header=normalized_url.netloc.decode("ascii"),
+        sni_hostname=original_host if scheme == "https" else None,
+    )
 
 
 @dataclass(repr=False)
@@ -221,13 +241,13 @@ class HttpAgentAdapter:
             raise AgentTimeoutError("External agent request exceeded its deadline.") from None
 
     async def _send_message(self, session: AgentSession, message: str) -> AgentTurnResult:
-        await validate_external_agent_endpoint(
+        destination = await validate_external_agent_endpoint(
             self.endpoint_url,
             production=self.production,
             resolver=self.resolver,
         )
         request = ExternalTurnRequest(conversation_id=session.session_id, message=message)
-        payload = await self._post(request.model_dump(mode="json"))
+        payload = await self._post(request.model_dump(mode="json"), destination)
 
         try:
             decoded = json.loads(payload)
@@ -254,22 +274,36 @@ class HttpAgentAdapter:
             ],
         )
 
-    async def _post(self, payload: dict[str, object]) -> bytes:
+    async def _post(
+        self,
+        payload: dict[str, object],
+        destination: ValidatedAgentEndpoint,
+    ) -> bytes:
         headers = {"Accept": "application/json", "Content-Type": "application/json"}
+        if destination.host_header is not None:
+            headers["Host"] = destination.host_header
         if self.bearer_token is not None and self.bearer_token.get_secret_value():
             headers["Authorization"] = f"Bearer {self.bearer_token.get_secret_value()}"
+
+        extensions = (
+            {"sni_hostname": destination.sni_hostname}
+            if destination.sni_hostname is not None
+            else None
+        )
 
         try:
             async with httpx.AsyncClient(
                 follow_redirects=False,
                 timeout=httpx.Timeout(self.timeout_seconds),
                 transport=self.transport,
+                trust_env=False,
             ) as client:
                 async with client.stream(
                     "POST",
-                    self.endpoint_url,
+                    destination.request_url,
                     json=payload,
                     headers=headers,
+                    extensions=extensions,
                 ) as response:
                     if response.status_code < 200 or response.status_code >= 300:
                         raise ExternalAgentHttpStatusError(response.status_code)

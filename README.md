@@ -167,7 +167,7 @@ pnpm build
 
 ## Current scope
 
-Implemented from issues #1, #2, #3, #4, #5, #6 and #8:
+Implemented from issues #1, #2, #3, #4, #5, #6, #8 and #17:
 
 - Next.js App Router frontend shell and responsive playground
 - FastAPI health and demo-conversation APIs
@@ -182,7 +182,7 @@ Implemented from issues #1, #2, #3, #4, #5, #6 and #8:
 - responsive results dashboard with checks, transcript, tool trace and coverage views
 - secure external HTTP agent adapter with connection testing and SSRF protections
 
-Current limitations: no durable persistence, saved agent connections, cross-run comparison, semantic/LLM judge, authentication, billing, distributed workers or release gate.
+Current limitations: no durable persistence, saved agent connections, cross-run comparison, semantic/LLM judge, authentication, billing, distributed workers, voice-agent testing or release gate.
 
 ## Documentation
 
