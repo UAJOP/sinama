@@ -8,7 +8,7 @@ A Turkish-first reliability lab for testing customer-service AI agents before pr
 
 ![SINAMA](docs/assets/readme/sinama-case-study-hero.webp)
 
-SINAMA runs a synthetic Turkish insurance claim-intake agent through five scripted multi-turn scenarios, then deterministically checks whether the agent called the right tools, in the right order, with the right arguments — and exposes the inspectable evidence when it doesn't.
+SINAMA runs a synthetic Turkish insurance claim-intake agent through five scripted multi-turn scenarios, then deterministically checks whether the agent called the required tools, avoided forbidden actions and used the expected structured arguments — then exposes inspectable evidence when the contract is violated.
 
 ## Reliability proof
 
@@ -23,7 +23,7 @@ The built-in `Insurance Reliability Pack v1` ships with an intentionally broken 
 
 ![Test run showing 5 total, 3 pass, 2 fail, 0 error](docs/assets/readme/sinama-runs-broken.webp)
 
-In both scenarios, the synthetic agent calls `submit_claim` before the required `damage_photo` has been collected. The agent doesn't crash and the run doesn't error — it completes normally. What fails is the agent's behavior: SINAMA's deterministic evaluator observes the tool-call sequence, detects that a required precondition was skipped, and reports it as a policy violation with the exact offending event as evidence.
+In both scenarios, the synthetic agent calls `submit_claim` before the required `damage_photo` has been collected. The agent doesn't crash and the run doesn't error — it completes normally. What fails is the agent's behavior: SINAMA's deterministic evaluator inspects the observed Tool Trace, detects the forbidden `submit_claim` call for that scenario, and reports the policy violation with the offending event as evidence.
 
 ![Tool Trace showing submit_claim called with status premature and missing_requirement damage_photo](docs/assets/readme/sinama-regression-evidence.webp)
 
@@ -83,7 +83,7 @@ Failure Evidence
 
 ### Reliability Pack
 
-- five synthetic Turkish insurance scenarios (`INS-001`–`INS-005`) covering tool policy, safety, privacy, human handoff and prompt-injection pressure
+- five synthetic Turkish insurance scenarios (`INS-001`–`INS-005`) involving tool policy, safety/privacy constraints, human handoff and prompt-injection pressure; current scoring remains deterministic tool-contract based
 - deterministic required/forbidden tool-call contracts with exact argument constraints
 - evidence-backed regression detection, not a pass/fail black box
 
