@@ -1,4 +1,5 @@
 export type AgentMode = "healthy" | "broken_premature_submission";
+export type AgentTarget = "built_in_demo" | "external_http";
 export type JsonScalar = string | number | boolean | null;
 export type RunLifecycleStatus = "queued" | "running" | "completed" | "error";
 export type ScenarioRunStatus = "pass" | "fail" | "error";
@@ -82,6 +83,7 @@ export interface TestRunSummary {
   run_id: string;
   pack_id: string;
   pack_name: string;
+  agent_target: AgentTarget;
   agent_mode: AgentMode;
   agent_label: string;
   lifecycle_status: RunLifecycleStatus;
@@ -167,6 +169,28 @@ export interface ScenarioRunResult {
   error: ScenarioExecutionError | null;
 }
 
+export interface ExternalAgentConfiguration {
+  endpoint_url: string;
+  bearer_token?: string;
+}
+
+export type ConnectionTestStatus =
+  | "success"
+  | "timeout"
+  | "http_error"
+  | "invalid_json"
+  | "invalid_response_schema"
+  | "response_too_large"
+  | "blocked_url"
+  | "network_error";
+
+export interface ConnectionTestResult {
+  status: ConnectionTestStatus;
+  message: string;
+  http_status_code: number | null;
+  observed_tool_events: number;
+}
+
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL ?? "http://localhost:8000").replace(
   /\/$/,
   "",
@@ -239,11 +263,29 @@ export function listScenarioPacks(signal?: AbortSignal): Promise<ScenarioPack[]>
 export function createTestRun(
   packId: string,
   agentMode: AgentMode,
+  agentTarget: AgentTarget,
+  externalAgent?: ExternalAgentConfiguration,
   signal?: AbortSignal,
 ): Promise<TestRunSummary> {
   return request("/api/runs", {
     method: "POST",
-    body: JSON.stringify({ pack_id: packId, agent_mode: agentMode }),
+    body: JSON.stringify({
+      pack_id: packId,
+      agent_mode: agentMode,
+      agent_target: agentTarget,
+      external_agent: externalAgent,
+    }),
+    signal,
+  });
+}
+
+export function testExternalAgentConnection(
+  configuration: ExternalAgentConfiguration,
+  signal?: AbortSignal,
+): Promise<ConnectionTestResult> {
+  return request("/api/agents/external/test-connection", {
+    method: "POST",
+    body: JSON.stringify(configuration),
     signal,
   });
 }

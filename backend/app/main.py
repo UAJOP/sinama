@@ -1,11 +1,19 @@
 from uuid import UUID
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
-from app.agent_adapters import BuiltInDemoAgentAdapter
+from app.agent_adapters import DemoAgentAdapter
 from app.config import get_settings
 from app.demo_agent import ConversationNotFoundError, demo_agent_service
+from app.http_agent import (
+    ConnectionTestResult,
+    ExternalAgentConfiguration,
+    build_http_agent_adapter,
+    test_http_agent_connection,
+)
 from app.models import (
     ConversationResponse,
     CreateConversationRequest,
@@ -22,6 +30,7 @@ from app.scenario_runner import ScenarioRunResult, scenario_runner
 from app.scenarios import ScenarioNotFoundError, load_scenario_by_id
 from app.test_runs import (
     CreateTestRunRequest,
+    InvalidRunAgentConfigurationError,
     ScenarioResultNotFoundError,
     TestRunNotFoundError,
     TestRunResultsResponse,
@@ -45,6 +54,21 @@ app.add_middleware(
     allow_methods=["GET", "POST"],
     allow_headers=["Content-Type"],
 )
+
+
+@app.exception_handler(RequestValidationError)
+async def sanitized_validation_error(
+    _request: Request,
+    error: RequestValidationError,
+) -> JSONResponse:
+    safe_errors = [
+        {key: value for key, value in item.items() if key not in {"ctx", "input"}}
+        for item in error.errors()
+    ]
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        content={"detail": safe_errors},
+    )
 
 
 @app.get("/health", response_model=HealthResponse, tags=["system"])
@@ -103,8 +127,20 @@ async def execute_scenario(
     except ScenarioNotFoundError as error:
         raise HTTPException(status_code=404, detail="Scenario not found") from error
 
-    adapter = BuiltInDemoAgentAdapter(mode=request.agent_mode)
+    adapter = DemoAgentAdapter(mode=request.agent_mode)
     return await scenario_runner.run(scenario, adapter)
+
+
+@app.post(
+    "/api/agents/external/test-connection",
+    response_model=ConnectionTestResult,
+    tags=["agents"],
+)
+async def test_external_agent_connection(
+    request: ExternalAgentConfiguration,
+) -> ConnectionTestResult:
+    adapter = build_http_agent_adapter(request)
+    return await test_http_agent_connection(adapter)
 
 
 @app.get(
@@ -124,9 +160,16 @@ def list_scenario_packs() -> list[ScenarioPackSummary]:
 )
 async def create_test_run(request: CreateTestRunRequest) -> TestRunSummary:
     try:
-        return await run_service.create_run(request.pack_id, request.agent_mode)
+        return await run_service.create_run(
+            request.pack_id,
+            request.agent_mode,
+            agent_target=request.agent_target,
+            external_agent=request.external_agent,
+        )
     except ScenarioPackNotFoundError as error:
         raise HTTPException(status_code=404, detail="Scenario pack not found") from error
+    except InvalidRunAgentConfigurationError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 @app.get(

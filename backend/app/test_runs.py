@@ -12,9 +12,10 @@ from uuid import UUID, uuid4
 
 from pydantic import Field
 
-from app.agent_adapters import AgentAdapter, BuiltInDemoAgentAdapter
+from app.agent_adapters import AgentAdapter, DemoAgentAdapter
 from app.evaluator import EvaluationStatus
-from app.models import AgentMode, StrictModel
+from app.http_agent import ExternalAgentConfiguration, build_http_agent_adapter
+from app.models import AgentMode, AgentTarget, StrictModel
 from app.scenario_packs import (
     ScenarioPackId,
     ScenarioPackRegistry,
@@ -61,6 +62,7 @@ class TestRunSummary(StrictModel):
     run_id: UUID
     pack_id: str
     pack_name: str
+    agent_target: AgentTarget = AgentTarget.BUILT_IN_DEMO
     agent_mode: AgentMode
     agent_label: str
     lifecycle_status: TestRunLifecycleStatus
@@ -80,13 +82,16 @@ class TestRunResultsResponse(StrictModel):
 
 class CreateTestRunRequest(StrictModel):
     pack_id: ScenarioPackId
-    agent_mode: AgentMode
+    agent_mode: AgentMode = AgentMode.HEALTHY
+    agent_target: AgentTarget = AgentTarget.BUILT_IN_DEMO
+    external_agent: ExternalAgentConfiguration | None = None
 
 
 @dataclass
 class StoredTestRun:
     run_id: UUID
     pack: ScenarioPackSummary
+    agent_target: AgentTarget
     agent_mode: AgentMode
     agent_label: str
     lifecycle_status: TestRunLifecycleStatus = TestRunLifecycleStatus.QUEUED
@@ -105,6 +110,10 @@ class ScenarioResultNotFoundError(LookupError):
     pass
 
 
+class InvalidRunAgentConfigurationError(ValueError):
+    pass
+
+
 class RunStore:
     """Thread-safe, bounded in-memory storage for single-process demo runs."""
 
@@ -115,13 +124,21 @@ class RunStore:
         self._runs: OrderedDict[UUID, StoredTestRun] = OrderedDict()
         self._lock = RLock()
 
-    def create_run(self, pack: ScenarioPackSummary, agent_mode: AgentMode) -> TestRunSummary:
+    def create_run(
+        self,
+        pack: ScenarioPackSummary,
+        agent_mode: AgentMode,
+        *,
+        agent_target: AgentTarget = AgentTarget.BUILT_IN_DEMO,
+        agent_label: str | None = None,
+    ) -> TestRunSummary:
         with self._lock:
             record = StoredTestRun(
                 run_id=uuid4(),
                 pack=pack.model_copy(deep=True),
+                agent_target=agent_target,
                 agent_mode=agent_mode,
-                agent_label=agent_mode.value,
+                agent_label=agent_label or agent_mode.value,
             )
             self._runs[record.run_id] = record
             self._prune_locked()
@@ -196,6 +213,7 @@ class RunStore:
             run_id=record.run_id,
             pack_id=record.pack.id,
             pack_name=record.pack.name,
+            agent_target=record.agent_target,
             agent_mode=record.agent_mode,
             agent_label=record.agent_label,
             lifecycle_status=record.lifecycle_status,
@@ -269,7 +287,9 @@ class ScenarioRunExecutor(Protocol):
     ) -> ScenarioRunResult: ...
 
 
-AgentAdapterFactory = Callable[[AgentMode], AgentAdapter]
+DemoAgentAdapterFactory = Callable[[AgentMode], AgentAdapter]
+HttpAgentAdapterFactory = Callable[[ExternalAgentConfiguration], AgentAdapter]
+ScenarioAdapterFactory = Callable[[], AgentAdapter]
 
 
 class RunService:
@@ -279,20 +299,56 @@ class RunService:
         registry: ScenarioPackRegistry = scenario_pack_registry,
         store: RunStore,
         runner: ScenarioRunExecutor = scenario_runner,
-        adapter_factory: AgentAdapterFactory = BuiltInDemoAgentAdapter,
+        adapter_factory: DemoAgentAdapterFactory = DemoAgentAdapter,
+        http_adapter_factory: HttpAgentAdapterFactory = build_http_agent_adapter,
     ) -> None:
         self._registry = registry
         self._store = store
         self._runner = runner
         self._adapter_factory = adapter_factory
+        self._http_adapter_factory = http_adapter_factory
         self._tasks: dict[UUID, asyncio.Task[None]] = {}
 
-    async def create_run(self, pack_id: str, agent_mode: AgentMode) -> TestRunSummary:
+    async def create_run(
+        self,
+        pack_id: str,
+        agent_mode: AgentMode,
+        *,
+        agent_target: AgentTarget = AgentTarget.BUILT_IN_DEMO,
+        external_agent: ExternalAgentConfiguration | None = None,
+    ) -> TestRunSummary:
         pack = self._registry.get_pack(pack_id)
         scenarios = self._registry.load_scenarios(pack_id)
-        summary = self._store.create_run(pack, agent_mode)
+        if agent_target is AgentTarget.BUILT_IN_DEMO:
+            if external_agent is not None:
+                raise InvalidRunAgentConfigurationError(
+                    "Built-in demo runs cannot include external agent configuration."
+                )
+            adapter_factory: ScenarioAdapterFactory = partial(
+                self._adapter_factory,
+                agent_mode,
+            )
+            agent_label = agent_mode.value
+        else:
+            if external_agent is None:
+                raise InvalidRunAgentConfigurationError(
+                    "External HTTP runs require endpoint configuration."
+                )
+            ephemeral_configuration = external_agent.model_copy(deep=True)
+            adapter_factory = partial(
+                self._http_adapter_factory,
+                ephemeral_configuration,
+            )
+            agent_label = AgentTarget.EXTERNAL_HTTP.value
+
+        summary = self._store.create_run(
+            pack,
+            agent_mode,
+            agent_target=agent_target,
+            agent_label=agent_label,
+        )
         task = asyncio.create_task(
-            self._execute_run(summary.run_id, scenarios, agent_mode),
+            self._execute_run(summary.run_id, scenarios, adapter_factory),
             name=f"sinama-run-{summary.run_id}",
         )
         self._tasks[summary.run_id] = task
@@ -309,14 +365,14 @@ class RunService:
         self,
         run_id: UUID,
         scenarios: list[Scenario],
-        agent_mode: AgentMode,
+        adapter_factory: ScenarioAdapterFactory,
     ) -> None:
         try:
             self._store.mark_running(run_id)
             for scenario in scenarios:
                 result = await self._runner.run(
                     scenario,
-                    self._adapter_factory(agent_mode),
+                    adapter_factory(),
                 )
                 self._store.add_result(run_id, result)
             self._store.mark_completed(run_id)
