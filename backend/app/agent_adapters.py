@@ -22,6 +22,14 @@ class MalformedAgentResponseError(RuntimeError):
     """Raised by adapters that cannot normalize an agent response safely."""
 
 
+class AgentRequestError(RuntimeError):
+    """Safe adapter request failure that must not expose upstream details."""
+
+
+class AgentTimeoutError(AgentRequestError):
+    """Raised when an adapter exceeds its bounded request deadline."""
+
+
 class AgentAdapter(Protocol):
     @property
     def label(self) -> str: ...
@@ -32,7 +40,7 @@ class AgentAdapter(Protocol):
 
 
 @dataclass
-class BuiltInDemoAgentAdapter:
+class DemoAgentAdapter:
     """Async adapter around the local deterministic Demo Insurance Agent."""
 
     mode: AgentMode
@@ -54,3 +62,6 @@ class BuiltInDemoAgentAdapter:
             tool_events=response.new_events,
             state_metadata=response.state.model_dump(mode="json"),
         )
+
+
+BuiltInDemoAgentAdapter = DemoAgentAdapter

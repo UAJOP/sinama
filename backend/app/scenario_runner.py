@@ -7,7 +7,9 @@ from pydantic import Field
 
 from app.agent_adapters import (
     AgentAdapter,
+    AgentRequestError,
     AgentSession,
+    AgentTimeoutError,
     AgentTurnResult,
     MalformedAgentResponseError,
 )
@@ -102,7 +104,7 @@ class ScenarioRunner:
             )
             if not isinstance(session, AgentSession):
                 raise MalformedAgentResponseError("Adapter returned an invalid session.")
-        except TimeoutError:
+        except (TimeoutError, AgentTimeoutError):
             return self._error_result(
                 scenario,
                 adapter.label,
@@ -121,6 +123,16 @@ class ScenarioRunner:
                 turns_executed,
                 ExecutionErrorCategory.MALFORMED_AGENT_RESPONSE,
                 "Agent adapter returned a malformed session response.",
+            )
+        except AgentRequestError:
+            return self._error_result(
+                scenario,
+                adapter.label,
+                transcript,
+                tool_trace,
+                turns_executed,
+                ExecutionErrorCategory.ADAPTER_ERROR,
+                "Agent adapter failed while creating a session.",
             )
         except Exception:
             logger.exception("Unexpected adapter error while starting scenario %s", scenario.id)
@@ -160,7 +172,7 @@ class ScenarioRunner:
                 )
                 if not isinstance(turn, AgentTurnResult):
                     raise MalformedAgentResponseError("Adapter returned an invalid turn.")
-            except TimeoutError:
+            except (TimeoutError, AgentTimeoutError):
                 return self._error_result(
                     scenario,
                     adapter.label,
@@ -179,6 +191,16 @@ class ScenarioRunner:
                     turns_executed,
                     ExecutionErrorCategory.MALFORMED_AGENT_RESPONSE,
                     "Agent adapter returned a malformed turn response.",
+                )
+            except AgentRequestError:
+                return self._error_result(
+                    scenario,
+                    adapter.label,
+                    transcript,
+                    tool_trace,
+                    turns_executed,
+                    ExecutionErrorCategory.ADAPTER_ERROR,
+                    "Agent adapter failed while processing a turn.",
                 )
             except Exception:
                 logger.exception(

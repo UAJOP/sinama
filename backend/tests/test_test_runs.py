@@ -1,4 +1,6 @@
 import asyncio
+import importlib
+import json
 import time
 from collections.abc import Iterator
 from pathlib import Path
@@ -6,10 +8,12 @@ from uuid import UUID, uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import SecretStr
 
-from app.agent_adapters import AgentAdapter
+from app.agent_adapters import AgentAdapter, DemoAgentAdapter
+from app.http_agent import ExternalAgentConfiguration
 from app.main import app
-from app.models import AgentMode
+from app.models import AgentMode, AgentTarget
 from app.scenario_packs import (
     ScenarioPackNotFoundError,
     ScenarioPackRegistry,
@@ -147,6 +151,40 @@ def test_broken_pack_uses_observed_results_and_preserves_ins_001_evidence() -> N
     assert offending.arguments["missing_requirement"] == "damage_photo"
 
 
+def test_external_target_uses_same_runner_without_persisting_credentials() -> None:
+    secret = "run-only-secret"
+    configurations: list[ExternalAgentConfiguration] = []
+
+    def external_factory(configuration: ExternalAgentConfiguration) -> AgentAdapter:
+        configurations.append(configuration)
+        return DemoAgentAdapter(AgentMode.HEALTHY, configuration_label="external_http")
+
+    async def execute() -> tuple[RunStore, dict[str, object]]:
+        store = RunStore()
+        service = RunService(store=store, http_adapter_factory=external_factory)
+        created = await service.create_run(
+            "insurance-v1",
+            AgentMode.HEALTHY,
+            agent_target=AgentTarget.EXTERNAL_HTTP,
+            external_agent=ExternalAgentConfiguration(
+                endpoint_url="https://agent.example.com/turn",
+                bearer_token=SecretStr(secret),
+            ),
+        )
+        completed = await service.wait_for_completion(created.run_id)
+        return store, completed.model_dump(mode="json")
+
+    store, payload = asyncio.run(execute())
+    run_id = UUID(str(payload["run_id"]))
+
+    assert payload["agent_target"] == "external_http"
+    assert payload["agent_label"] == "external_http"
+    assert payload["aggregate"] == {"total": 5, "passed": 5, "failed": 0, "errors": 0}
+    assert len(configurations) == 5
+    assert secret not in store.get_run(run_id).model_dump_json()
+    assert secret not in store.get_results(run_id).model_dump_json()
+
+
 def test_completed_run_detail_is_returned_as_an_immutable_copy() -> None:
     store, payload = asyncio.run(execute_pack(AgentMode.HEALTHY))
     run_id = UUID(str(payload["run_id"]))
@@ -266,9 +304,46 @@ def test_run_api_accepts_both_demo_modes(client: TestClient, mode: str) -> None:
     assert response.status_code == 202
     payload = response.json()
     assert payload["agent_mode"] == mode
+    assert payload["agent_target"] == "built_in_demo"
     terminal = wait_for_api_run(client, payload["run_id"])
     assert terminal["lifecycle_status"] == "completed"
     assert terminal["completed_scenarios"] == 5
+
+
+def test_external_run_api_uses_ephemeral_configuration(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    secret = "api-run-secret"
+
+    def external_factory(_configuration: ExternalAgentConfiguration) -> AgentAdapter:
+        return DemoAgentAdapter(AgentMode.HEALTHY, configuration_label="external_http")
+
+    main_module = importlib.import_module("app.main")
+    monkeypatch.setattr(
+        main_module,
+        "run_service",
+        RunService(store=run_store, http_adapter_factory=external_factory),
+    )
+
+    response = client.post(
+        "/api/runs",
+        json={
+            "pack_id": "insurance-v1",
+            "agent_target": "external_http",
+            "external_agent": {
+                "endpoint_url": "https://agent.example.com/turn",
+                "bearer_token": secret,
+            },
+        },
+    )
+
+    assert response.status_code == 202
+    assert response.json()["agent_target"] == "external_http"
+    assert secret not in response.text
+    terminal = wait_for_api_run(client, response.json()["run_id"])
+    assert terminal["aggregate"] == {"total": 5, "passed": 5, "failed": 0, "errors": 0}
+    assert secret not in json.dumps(terminal)
 
 
 def test_run_api_rejects_invalid_mode_and_unknown_pack(client: TestClient) -> None:
@@ -280,10 +355,18 @@ def test_run_api_rejects_invalid_mode_and_unknown_pack(client: TestClient) -> No
         "/api/runs",
         json={"pack_id": "missing-pack", "agent_mode": "healthy"},
     )
+    missing_external_configuration = client.post(
+        "/api/runs",
+        json={"pack_id": "insurance-v1", "agent_target": "external_http"},
+    )
 
     assert invalid_mode.status_code == 422
     assert unknown_pack.status_code == 404
     assert unknown_pack.json() == {"detail": "Scenario pack not found"}
+    assert missing_external_configuration.status_code == 422
+    assert missing_external_configuration.json() == {
+        "detail": "External HTTP runs require endpoint configuration."
+    }
 
 
 def test_run_result_apis_return_summary_and_full_detail(client: TestClient) -> None:

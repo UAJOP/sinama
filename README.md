@@ -16,7 +16,7 @@ The Demo Agent Playground lets a developer:
 - reset state between tests, and
 - reproduce `INS-001` without an LLM, external insurer service, database or API key.
 
-The **Test Runs** dashboard executes the stable five-scenario `insurance-v1` pack against either demo mode. It reports live lifecycle progress, observed pass/fail/error aggregates and scenario-level checks, transcript, tool trace and declared/unscored coverage metadata.
+The **Test Runs** dashboard executes the stable five-scenario `insurance-v1` pack against either demo mode or a user-supplied external HTTP agent. It tests the external turn contract before a run and reports the same lifecycle progress, aggregates, checks, transcript, tool trace and declared/unscored coverage metadata for both targets.
 
 The broken mode is intentional. It submits a synthetic claim before the required `damage_photo` exists so a later SINAMA evaluator has a stable regression to detect.
 
@@ -81,6 +81,8 @@ On macOS/Linux, use `cp .env.example .env.local`. Open `http://localhost:3000` f
 
 Open `/runs`, select `Insurance Reliability Pack v1`, choose a mode and start the run. The browser creates the run once, then performs bounded, non-overlapping status polling until the backend reports a terminal lifecycle state.
 
+To use an external agent, choose `External HTTP Agent`, enter its turn endpoint and optional bearer token, and test the connection before starting the pack. The token stays only in page memory until the run request is accepted; SINAMA does not persist it. External results use the existing checks, transcript, tool trace, coverage and evidence views.
+
 Expected built-in outcomes:
 
 - Healthy: **5 pass, 0 fail, 0 error**.
@@ -91,6 +93,7 @@ Run lifecycle (`queued`, `running`, `completed`, `error`) describes orchestratio
 Run API:
 
 - `GET /api/scenario-packs`
+- `POST /api/agents/external/test-connection`
 - `POST /api/runs`
 - `GET /api/runs/{run_id}`
 - `GET /api/runs/{run_id}/results`
@@ -164,7 +167,7 @@ pnpm build
 
 ## Current scope
 
-Implemented from issues #1, #2, #3, #4, #5, #6 and #8:
+Implemented from issues #1, #2, #3, #4, #5, #6, #8 and #17:
 
 - Next.js App Router frontend shell and responsive playground
 - FastAPI health and demo-conversation APIs
@@ -177,8 +180,9 @@ Implemented from issues #1, #2, #3, #4, #5, #6 and #8:
 - typed five-scenario pack and asynchronous run orchestration
 - bounded in-memory run summaries and scenario evidence APIs
 - responsive results dashboard with checks, transcript, tool trace and coverage views
+- secure external HTTP agent adapter with connection testing and SSRF protections
 
-Current limitations: no durable persistence, cross-run comparison, semantic/LLM judge, external agent adapter, authentication, billing, distributed workers or release gate.
+Current limitations: no durable persistence, saved agent connections, cross-run comparison, semantic/LLM judge, authentication, billing, distributed workers, voice-agent testing or release gate.
 
 ## Documentation
 
