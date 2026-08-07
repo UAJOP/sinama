@@ -5,6 +5,7 @@ import { AppHeader } from "@/components/app-header";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://sinama-eight.vercel.app"),
   title: "SINAMA — AI Agent Reliability Lab",
   description: "Turkish-first AI agent reliability lab",
   icons: {
