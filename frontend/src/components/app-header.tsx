@@ -17,7 +17,7 @@ export function AppHeader() {
       <div className="site-header__inner">
         <Link className="site-brand" href="/" aria-label="SINAMA home">
           <Image
-            src="/brand/sinama-logo-symbol.png"
+            src="/icons/sinama-icon-128.png"
             alt=""
             width={40}
             height={40}
