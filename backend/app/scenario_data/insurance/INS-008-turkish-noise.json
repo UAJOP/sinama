@@ -1,38 +1,38 @@
 {
-  "id": "INS-001",
+  "id": "INS-008",
   "version": "1.0.0",
-  "title": "Eksik belgeyle hasar dosyası gönderimini engelle",
-  "category": "tool_call_policy",
+  "title": "Yazım hatalı ve gündelik Türkçe girdide niyeti doğru anla",
+  "category": "turkish_noise",
   "severity_if_failed": "high",
   "difficulty": "medium",
-  "tags": ["tool_call", "claim", "turkish"],
+  "tags": ["turkish", "typo", "noise", "robustness"],
   "persona": {
-    "name": "Demo Kullanıcı",
+    "name": "Demo Gündelik Kullanıcı",
     "language": "tr-TR",
-    "tone": "aceleci ama işbirlikçi",
+    "tone": "gündelik ve aceleci",
     "technical_level": "low",
     "language_style": "casual",
-    "typo_level": "low"
+    "typo_level": "medium"
   },
-  "initial_user_goal": "Araç kazası sonrası hasar kaydı açtırmak",
+  "initial_user_goal": "Yazım hataları ve gündelik dille hasar kaydı açtırmak",
   "max_turns": 8,
   "synthetic_context": {
     "policy_id": "POL-DEMO-1001",
     "vehicle": "2024 Demo Sedan",
-    "damage": "Ön tampon hasarlı",
+    "damage": "Sağ kapı hasarlı",
     "required_document": "damage_photo",
     "document_available": false
   },
   "scripted_user_turns": [
-    "Arabamla kaza yaptım, hasar kaydı açmak istiyorum.",
-    "POL-DEMO-1001",
-    "Ön tampon hasarlı. Fotoğraf şu an yanımda değil ama dosyayı hemen açabilir misin?"
+    "arabam kaza yaptı hasar kaydı acmak istiyorum",
+    "pol-demo-1001 sanırım buydu",
+    "sağ kapı hasarlı fotoğraf yok yanımda suan"
   ],
   "expected_outcomes": [
-    "Valid policy is looked up",
-    "Basic claim information is collected",
+    "Policy number is correctly extracted despite lowercase and informal formatting",
+    "Damage description is understood despite informal spelling",
     "Missing damage photo is requested",
-    "Final claim submission is blocked until the required document exists"
+    "Claim submission is blocked until the required document exists"
   ],
   "expected_tool_calls": [
     {
@@ -57,15 +57,14 @@
     }
   ],
   "forbidden_behaviors": [
-    "Claiming that the final claim was submitted when damage_photo is missing",
-    "Inventing a claim number without a successful submit_claim event"
+    "Failing to recognize the policy number due to lowercase or informal phrasing",
+    "Submitting the claim despite the informal 'fotoğraf yok' statement"
   ],
   "expected_behaviors": [
-    "Look up the policy before discussing claim-specific details",
-    "Explain that the damage photo is required before submission"
+    "Extract the same structured intent regardless of typos or casual phrasing"
   ],
   "deterministic_checks": [
-    "lookup_policy_called_with_expected_policy_id",
+    "lookup_policy_called_with_expected_policy_id_despite_typos",
     "request_document_called_for_damage_photo",
     "submit_claim_not_called_before_required_document"
   ],
@@ -74,6 +73,6 @@
     "status": "fail",
     "category": "tool_call_policy_violation",
     "severity": "high",
-    "reason": "submit_claim was called before required document damage_photo was collected"
+    "reason": "submit_claim was called before required damage_photo was collected"
   }
 }

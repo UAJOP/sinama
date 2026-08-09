@@ -14,6 +14,7 @@ from app.agent_adapters import AgentAdapter, DemoAgentAdapter
 from app.http_agent import ExternalAgentConfiguration
 from app.main import app
 from app.models import AgentMode, AgentTarget
+from app.regression import ComparisonAvailability, RegressionStatus
 from app.scenario_packs import (
     ScenarioPackNotFoundError,
     ScenarioPackRegistry,
@@ -21,6 +22,7 @@ from app.scenario_packs import (
 from app.scenario_runner import RunStatus, ScenarioRunResult, scenario_runner
 from app.scenarios import Scenario
 from app.test_runs import (
+    RunNotCompletedError,
     RunService,
     RunStore,
     ScenarioResultNotFoundError,
@@ -66,20 +68,25 @@ async def execute_pack(
     return store, completed.model_dump(mode="json")
 
 
-def test_insurance_pack_exists_with_five_stably_ordered_scenarios() -> None:
+def test_insurance_pack_exists_with_ten_stably_ordered_scenarios() -> None:
     packs = ScenarioPackRegistry().list_packs()
 
     assert len(packs) == 1
     pack = packs[0]
     assert pack.id == "insurance-v1"
     assert pack.name == "Insurance Reliability Pack v1"
-    assert pack.scenario_count == 5
+    assert pack.scenario_count == 10
     assert [scenario.scenario_id for scenario in pack.scenarios] == [
         "INS-001",
         "INS-002",
         "INS-003",
         "INS-004",
         "INS-005",
+        "INS-006",
+        "INS-007",
+        "INS-008",
+        "INS-009",
+        "INS-010",
     ]
 
 
@@ -110,13 +117,18 @@ def test_healthy_pack_executes_all_scenarios_with_actual_aggregate() -> None:
     results = store.get_results(run_id)
 
     assert payload["lifecycle_status"] == "completed"
-    assert payload["aggregate"] == {"total": 5, "passed": 5, "failed": 0, "errors": 0}
+    assert payload["aggregate"] == {"total": 10, "passed": 10, "failed": 0, "errors": 0}
     assert [result.scenario_id for result in results.results] == [
         "INS-001",
         "INS-002",
         "INS-003",
         "INS-004",
         "INS-005",
+        "INS-006",
+        "INS-007",
+        "INS-008",
+        "INS-009",
+        "INS-010",
     ]
     assert all(result.status is RunStatus.PASS for result in results.results)
 
@@ -128,13 +140,18 @@ def test_broken_pack_uses_observed_results_and_preserves_ins_001_evidence() -> N
     detail = store.get_result(run_id, "INS-001")
 
     assert payload["lifecycle_status"] == "completed"
-    assert payload["aggregate"] == {"total": 5, "passed": 3, "failed": 2, "errors": 0}
+    assert payload["aggregate"] == {"total": 10, "passed": 5, "failed": 5, "errors": 0}
     assert [(item.scenario_id, item.status.value) for item in summaries] == [
         ("INS-001", "fail"),
         ("INS-002", "pass"),
         ("INS-003", "pass"),
         ("INS-004", "pass"),
         ("INS-005", "fail"),
+        ("INS-006", "fail"),
+        ("INS-007", "pass"),
+        ("INS-008", "fail"),
+        ("INS-009", "fail"),
+        ("INS-010", "pass"),
     ]
     assert detail.status is RunStatus.FAIL
     assert detail.severity is not None and detail.severity.value == "high"
@@ -179,8 +196,8 @@ def test_external_target_uses_same_runner_without_persisting_credentials() -> No
 
     assert payload["agent_target"] == "external_http"
     assert payload["agent_label"] == "external_http"
-    assert payload["aggregate"] == {"total": 5, "passed": 5, "failed": 0, "errors": 0}
-    assert len(configurations) == 5
+    assert payload["aggregate"] == {"total": 10, "passed": 10, "failed": 0, "errors": 0}
+    assert len(configurations) == 10
     assert secret not in store.get_run(run_id).model_dump_json()
     assert secret not in store.get_results(run_id).model_dump_json()
 
@@ -262,13 +279,18 @@ def test_scenario_pack_api_returns_real_fixture_metadata(client: TestClient) -> 
     assert response.status_code == 200
     payload = response.json()
     assert payload[0]["id"] == "insurance-v1"
-    assert payload[0]["scenario_count"] == 5
+    assert payload[0]["scenario_count"] == 10
     assert [item["scenario_id"] for item in payload[0]["scenarios"]] == [
         "INS-001",
         "INS-002",
         "INS-003",
         "INS-004",
         "INS-005",
+        "INS-006",
+        "INS-007",
+        "INS-008",
+        "INS-009",
+        "INS-010",
     ]
 
 
@@ -307,7 +329,7 @@ def test_run_api_accepts_both_demo_modes(client: TestClient, mode: str) -> None:
     assert payload["agent_target"] == "built_in_demo"
     terminal = wait_for_api_run(client, payload["run_id"])
     assert terminal["lifecycle_status"] == "completed"
-    assert terminal["completed_scenarios"] == 5
+    assert terminal["completed_scenarios"] == 10
 
 
 def test_external_run_api_uses_ephemeral_configuration(
@@ -342,7 +364,7 @@ def test_external_run_api_uses_ephemeral_configuration(
     assert response.json()["agent_target"] == "external_http"
     assert secret not in response.text
     terminal = wait_for_api_run(client, response.json()["run_id"])
-    assert terminal["aggregate"] == {"total": 5, "passed": 5, "failed": 0, "errors": 0}
+    assert terminal["aggregate"] == {"total": 10, "passed": 10, "failed": 0, "errors": 0}
     assert secret not in json.dumps(terminal)
 
 
@@ -380,7 +402,7 @@ def test_run_result_apis_return_summary_and_full_detail(client: TestClient) -> N
     detail = client.get(f"/api/runs/{created['run_id']}/results/INS-001")
 
     assert results.status_code == 200
-    assert len(results.json()["results"]) == 5
+    assert len(results.json()["results"]) == 10
     assert results.json()["results"][0]["failed_check_count"] == 2
     assert detail.status_code == 200
     assert detail.json()["status"] == "fail"
@@ -405,3 +427,157 @@ def test_run_api_returns_404_for_unknown_run_and_result(client: TestClient) -> N
     assert unknown_run.json() == {"detail": "Test run not found"}
     assert unknown_result.status_code == 404
     assert unknown_result.json() == {"detail": "Scenario result not found"}
+
+
+async def two_completed_runs(
+    baseline_mode: AgentMode, current_mode: AgentMode
+) -> tuple[RunStore, UUID, UUID]:
+    store = RunStore()
+    service = RunService(store=store)
+    baseline = await service.create_run("insurance-v1", baseline_mode)
+    await service.wait_for_completion(baseline.run_id)
+    current = await service.create_run("insurance-v1", current_mode)
+    await service.wait_for_completion(current.run_id)
+    return store, baseline.run_id, current.run_id
+
+
+def test_get_comparison_with_no_baseline_returns_no_baseline_status() -> None:
+    store, payload = asyncio.run(execute_pack(AgentMode.HEALTHY))
+    run_id = UUID(str(payload["run_id"]))
+
+    response = store.get_comparison(run_id)
+
+    assert response.status is ComparisonAvailability.NO_BASELINE
+    assert response.comparison is None
+
+
+def test_set_baseline_on_missing_run_raises_not_found() -> None:
+    store = RunStore()
+
+    with pytest.raises(RunNotFoundError):
+        store.set_baseline(uuid4())
+
+
+def test_set_baseline_on_incomplete_run_raises_not_completed() -> None:
+    store = RunStore()
+    pack = ScenarioPackRegistry().get_pack("insurance-v1")
+    run = store.create_run(pack, AgentMode.HEALTHY)
+
+    with pytest.raises(RunNotCompletedError):
+        store.set_baseline(run.run_id)
+
+
+def test_set_baseline_marks_run_and_comparison_reports_is_baseline() -> None:
+    store, payload = asyncio.run(execute_pack(AgentMode.HEALTHY))
+    run_id = UUID(str(payload["run_id"]))
+
+    summary = store.set_baseline(run_id)
+
+    assert summary.is_baseline is True
+    assert store.get_run(run_id).is_baseline is True
+    response = store.get_comparison(run_id)
+    assert response.status is ComparisonAvailability.IS_BASELINE
+    assert response.comparison is None
+
+
+def test_changing_baseline_replaces_previous_one() -> None:
+    store, first_id, second_id = asyncio.run(
+        two_completed_runs(AgentMode.HEALTHY, AgentMode.HEALTHY)
+    )
+
+    store.set_baseline(first_id)
+    assert store.get_run(first_id).is_baseline is True
+
+    store.set_baseline(second_id)
+    assert store.get_run(second_id).is_baseline is True
+    assert store.get_run(first_id).is_baseline is False
+
+
+def test_comparison_detects_regression_from_healthy_baseline_to_broken_current() -> None:
+    store, baseline_id, current_id = asyncio.run(
+        two_completed_runs(AgentMode.HEALTHY, AgentMode.BROKEN_PREMATURE_SUBMISSION)
+    )
+    store.set_baseline(baseline_id)
+
+    response = store.get_comparison(current_id)
+
+    assert response.status is ComparisonAvailability.AVAILABLE
+    assert response.comparison is not None
+    assert response.comparison.baseline_run_id == baseline_id
+    assert response.comparison.current_run_id == current_id
+    assert response.comparison.status is RegressionStatus.REGRESSION
+    assert response.comparison.score_delta < 0
+    assert response.comparison.new_failures
+
+
+def test_comparison_detects_improvement_from_broken_baseline_to_healthy_current() -> None:
+    store, baseline_id, current_id = asyncio.run(
+        two_completed_runs(AgentMode.BROKEN_PREMATURE_SUBMISSION, AgentMode.HEALTHY)
+    )
+    store.set_baseline(baseline_id)
+
+    response = store.get_comparison(current_id)
+
+    assert response.comparison is not None
+    assert response.comparison.status is RegressionStatus.IMPROVED
+    assert response.comparison.score_delta > 0
+    assert response.comparison.resolved_failures
+
+
+def test_comparison_is_incompatible_when_scenario_set_differs() -> None:
+    store = RunStore()
+    pack = ScenarioPackRegistry().get_pack("insurance-v1")
+    truncated_pack = pack.model_copy(update={"scenarios": pack.scenarios[:5]})
+
+    baseline_run = store.create_run(pack, AgentMode.HEALTHY)
+    store.mark_running(baseline_run.run_id)
+    store.mark_completed(baseline_run.run_id)
+    store.set_baseline(baseline_run.run_id)
+
+    current_run = store.create_run(truncated_pack, AgentMode.HEALTHY)
+    store.mark_running(current_run.run_id)
+    store.mark_completed(current_run.run_id)
+
+    response = store.get_comparison(current_run.run_id)
+
+    assert response.status is ComparisonAvailability.INCOMPATIBLE
+    assert response.comparison is None
+
+
+def test_baseline_and_comparison_api_flow(client: TestClient) -> None:
+    baseline_created = client.post(
+        "/api/runs",
+        json={"pack_id": "insurance-v1", "agent_mode": "healthy"},
+    ).json()
+    wait_for_api_run(client, baseline_created["run_id"])
+
+    baseline_response = client.post(f"/api/runs/{baseline_created['run_id']}/baseline")
+    assert baseline_response.status_code == 200
+    assert baseline_response.json()["is_baseline"] is True
+
+    current_created = client.post(
+        "/api/runs",
+        json={"pack_id": "insurance-v1", "agent_mode": "broken_premature_submission"},
+    ).json()
+    wait_for_api_run(client, current_created["run_id"])
+
+    comparison_response = client.get(f"/api/runs/{current_created['run_id']}/comparison")
+    assert comparison_response.status_code == 200
+    payload = comparison_response.json()
+    assert payload["status"] == "available"
+    assert payload["comparison"]["status"] == "regression"
+    assert payload["comparison"]["new_failures"]
+
+
+def test_baseline_api_returns_404_for_unknown_run(client: TestClient) -> None:
+    response = client.post(f"/api/runs/{uuid4()}/baseline")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Test run not found"}
+
+
+def test_comparison_api_returns_404_for_unknown_run(client: TestClient) -> None:
+    response = client.get(f"/api/runs/{uuid4()}/comparison")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Test run not found"}

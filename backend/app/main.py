@@ -21,6 +21,7 @@ from app.models import (
     HealthResponse,
     SendMessageRequest,
 )
+from app.regression import RegressionComparisonResponse
 from app.scenario_packs import (
     ScenarioPackNotFoundError,
     ScenarioPackSummary,
@@ -31,6 +32,7 @@ from app.scenarios import ScenarioNotFoundError, load_scenario_by_id
 from app.test_runs import (
     CreateTestRunRequest,
     InvalidRunAgentConfigurationError,
+    RunNotCompletedError,
     ScenarioResultNotFoundError,
     TestRunNotFoundError,
     TestRunResultsResponse,
@@ -208,3 +210,29 @@ def get_test_run_result(run_id: UUID, scenario_id: str) -> ScenarioRunResult:
         raise HTTPException(status_code=404, detail="Test run not found") from error
     except ScenarioResultNotFoundError as error:
         raise HTTPException(status_code=404, detail="Scenario result not found") from error
+
+
+@app.post(
+    "/api/runs/{run_id}/baseline",
+    response_model=TestRunSummary,
+    tags=["test-runs"],
+)
+def set_test_run_baseline(run_id: UUID) -> TestRunSummary:
+    try:
+        return run_store.set_baseline(run_id)
+    except TestRunNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Test run not found") from error
+    except RunNotCompletedError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.get(
+    "/api/runs/{run_id}/comparison",
+    response_model=RegressionComparisonResponse,
+    tags=["test-runs"],
+)
+def get_test_run_comparison(run_id: UUID) -> RegressionComparisonResponse:
+    try:
+        return run_store.get_comparison(run_id)
+    except TestRunNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Test run not found") from error

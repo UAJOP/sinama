@@ -5,18 +5,29 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   createTestRun,
+  getRunComparison,
   getScenarioRunResult,
   getTestRun,
   getTestRunResults,
   listScenarioPacks,
+  setRunBaseline,
   testExternalAgentConnection,
   type AgentMode,
   type AgentTarget,
   type ConnectionTestStatus,
   type EvaluationCheck,
+  type Failure,
   type JsonScalar,
+  type MetricComparison,
+  type MetricDimension,
+  type MetricScore,
+  type MetricStatus,
+  type RegressionComparison,
+  type RegressionComparisonResponse,
+  type RegressionStatus,
   type RunLifecycleStatus,
   type ScenarioCategory,
+  type ScenarioFailure,
   type ScenarioPack,
   type ScenarioResultSummary,
   type ScenarioRunResult,
@@ -28,8 +39,10 @@ import {
 
 import styles from "./runs.module.css";
 
-type DetailTab = "checks" | "transcript" | "trace" | "coverage";
+type DetailTab = "checks" | "metrics" | "failures" | "transcript" | "trace" | "coverage";
 type ConnectionState = "idle" | "testing" | ConnectionTestStatus;
+type FailureFilter = "all" | Severity;
+type RunView = "results" | "regression";
 
 const TARGET_OPTIONS: { value: AgentTarget; label: string; note: string }[] = [
   {
@@ -72,6 +85,11 @@ const CATEGORY_LABELS: Record<ScenarioCategory, string> = {
   privacy: "Privacy",
   human_handoff: "Human handoff",
   prompt_injection: "Prompt injection",
+  context_retention: "Context retention",
+  ambiguous_intent: "Ambiguous intent",
+  turkish_noise: "Turkish noise",
+  repeated_request: "Repeated request",
+  failed_tool_recovery: "Failed tool recovery",
 };
 
 const SEVERITY_LABELS: Record<Severity, string> = {
@@ -83,9 +101,39 @@ const SEVERITY_LABELS: Record<Severity, string> = {
 
 const TAB_LABELS: Record<DetailTab, string> = {
   checks: "Checks",
+  metrics: "Metrics",
+  failures: "Failures",
   transcript: "Transcript",
   trace: "Tool Trace",
   coverage: "Coverage",
+};
+
+const METRIC_LABELS: Record<MetricDimension, string> = {
+  goal_completion: "Goal Completion",
+  tool_usage: "Tool Usage",
+  handoff: "Handoff",
+  safety: "Safety",
+  conversation_quality: "Conversation Quality",
+};
+
+const METRIC_STATUS_LABELS: Record<MetricStatus, string> = {
+  pass: "Pass",
+  warning: "Warning",
+  fail: "Fail",
+  not_applicable: "N/A",
+};
+
+const FAILURE_FILTERS: FailureFilter[] = ["all", "critical", "high", "medium", "low"];
+
+const REGRESSION_STATUS_LABELS: Record<RegressionStatus, string> = {
+  improved: "Improved",
+  stable: "Stable",
+  regression: "Regression",
+};
+
+const RUN_VIEW_LABELS: Record<RunView, string> = {
+  results: "Scenario Results",
+  regression: "Regression",
 };
 
 const TERMINAL_STATUSES: RunLifecycleStatus[] = ["completed", "error"];
@@ -143,11 +191,22 @@ export function RunsDashboard() {
   const [runError, setRunError] = useState<string | null>(null);
   const [detailError, setDetailError] = useState<string | null>(null);
 
+  const [runView, setRunView] = useState<RunView>("results");
+  const [comparisonResponse, setComparisonResponse] = useState<RegressionComparisonResponse | null>(
+    null,
+  );
+  const [isLoadingComparison, setIsLoadingComparison] = useState(false);
+  const [comparisonError, setComparisonError] = useState<string | null>(null);
+  const [comparisonReload, setComparisonReload] = useState(0);
+  const [isSettingBaseline, setIsSettingBaseline] = useState(false);
+  const [baselineError, setBaselineError] = useState<string | null>(null);
+
   const createSerial = useRef(0);
   const pollSerial = useRef(0);
   const resultsSerial = useRef(0);
   const detailSerial = useRef(0);
   const connectionSerial = useRef(0);
+  const comparisonSerial = useRef(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -228,6 +287,11 @@ export function RunsDashboard() {
     setSelectedScenarioId(null);
     setDetail(null);
     setActiveTab("checks");
+    setRunView("results");
+    setBaselineError(null);
+    setComparisonResponse(null);
+    setComparisonError(null);
+    ++comparisonSerial.current;
 
     try {
       const created = await createTestRun(
@@ -265,6 +329,23 @@ export function RunsDashboard() {
     selectedPackId,
   ]);
 
+  const handleSetBaseline = useCallback(async () => {
+    if (!run || run.lifecycle_status !== "completed" || isSettingBaseline) return;
+    setIsSettingBaseline(true);
+    setBaselineError(null);
+    try {
+      const updated = await setRunBaseline(run.run_id);
+      setRun(updated);
+      setIsLoadingComparison(true);
+      setComparisonError(null);
+      setComparisonReload((value) => value + 1);
+    } catch (cause) {
+      setBaselineError(errorMessage(cause, "This run could not be set as the baseline."));
+    } finally {
+      setIsSettingBaseline(false);
+    }
+  }, [isSettingBaseline, run]);
+
   useEffect(() => {
     if (!run || TERMINAL_STATUSES.includes(run.lifecycle_status)) return;
 
@@ -280,6 +361,8 @@ export function RunsDashboard() {
         consecutiveFailures = 0;
         if (TERMINAL_STATUSES.includes(current.lifecycle_status)) {
           setIsLoadingResults(true);
+          setIsLoadingComparison(true);
+          setComparisonError(null);
         }
         setRun(current);
         if (!TERMINAL_STATUSES.includes(current.lifecycle_status)) {
@@ -331,6 +414,28 @@ export function RunsDashboard() {
 
     return () => controller.abort();
   }, [terminalRunId]);
+
+  useEffect(() => {
+    if (!terminalRunId) return;
+
+    const serial = ++comparisonSerial.current;
+    const controller = new AbortController();
+
+    void getRunComparison(terminalRunId, controller.signal)
+      .then((payload) => {
+        if (serial === comparisonSerial.current) setComparisonResponse(payload);
+      })
+      .catch((cause: unknown) => {
+        if (!isAbortError(cause) && serial === comparisonSerial.current) {
+          setComparisonError(errorMessage(cause, "Regression comparison could not be loaded."));
+        }
+      })
+      .finally(() => {
+        if (serial === comparisonSerial.current) setIsLoadingComparison(false);
+      });
+
+    return () => controller.abort();
+  }, [terminalRunId, comparisonReload]);
 
   useEffect(() => {
     if (!activeRunId || !selectedScenarioId) return;
@@ -569,7 +674,14 @@ export function RunsDashboard() {
         <EmptyRunState />
       ) : (
         <>
-          <RunOverview run={run} progressPercent={progressPercent} />
+          <RunOverview
+            run={run}
+            progressPercent={progressPercent}
+            comparisonResponse={comparisonResponse}
+            onSetBaseline={() => void handleSetBaseline()}
+            isSettingBaseline={isSettingBaseline}
+            baselineError={baselineError}
+          />
           {run.lifecycle_status === "error" && run.error && (
             <div className={styles.executionError} role="alert">
               <strong>{run.error.category}</strong>
@@ -577,7 +689,30 @@ export function RunsDashboard() {
             </div>
           )}
 
-          {isLoadingResults ? (
+          {TERMINAL_STATUSES.includes(run.lifecycle_status) && (
+            <div className={styles.viewToggle} role="tablist" aria-label="Run detail view">
+              {(Object.keys(RUN_VIEW_LABELS) as RunView[]).map((view) => (
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={runView === view}
+                  className={runView === view ? styles.activeViewTab : ""}
+                  key={view}
+                  onClick={() => setRunView(view)}
+                >
+                  {RUN_VIEW_LABELS[view]}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {runView === "regression" ? (
+            <RegressionView
+              response={comparisonResponse}
+              isLoading={isLoadingComparison}
+              error={comparisonError}
+            />
+          ) : isLoadingResults ? (
             <LoadingBlock label="Loading scenario summaries…" />
           ) : results.length > 0 ? (
             <section className={styles.inspectionGrid} aria-label="Run results inspection">
@@ -625,7 +760,7 @@ function EmptyRunState() {
           scenario evidence workflow.
         </p>
         <ul className={styles.emptyFacts}>
-          <li>5 synthetic Turkish scenarios</li>
+          <li>10 synthetic Turkish scenarios</li>
           <li>Structured tool-contract evaluation</li>
           <li>No external API key required</li>
         </ul>
@@ -634,13 +769,34 @@ function EmptyRunState() {
   );
 }
 
-function RunOverview({ run, progressPercent }: { run: TestRunSummary; progressPercent: number }) {
+function RunOverview({
+  run,
+  progressPercent,
+  comparisonResponse,
+  onSetBaseline,
+  isSettingBaseline,
+  baselineError,
+}: {
+  run: TestRunSummary;
+  progressPercent: number;
+  comparisonResponse: RegressionComparisonResponse | null;
+  onSetBaseline: () => void;
+  isSettingBaseline: boolean;
+  baselineError: string | null;
+}) {
   const aggregateCards = [
     { label: "Total", value: run.aggregate.total, tone: "neutral", icon: "Σ" },
     { label: "Passed", value: run.aggregate.passed, tone: "pass", icon: "✓" },
     { label: "Failed", value: run.aggregate.failed, tone: "fail", icon: "!" },
     { label: "Errors", value: run.aggregate.errors, tone: "error", icon: "×" },
   ] as const;
+
+  const regressionBadge =
+    run.is_baseline
+      ? { label: "Baseline", status: "baseline" as const }
+      : comparisonResponse?.status === "available" && comparisonResponse.comparison
+        ? { label: REGRESSION_STATUS_LABELS[comparisonResponse.comparison.status], status: comparisonResponse.comparison.status }
+        : null;
 
   return (
     <section className={styles.overview} aria-labelledby="run-overview-title">
@@ -650,9 +806,16 @@ function RunOverview({ run, progressPercent }: { run: TestRunSummary; progressPe
           <h2 id="run-overview-title">{run.pack_name}</h2>
           <code>{run.run_id}</code>
         </div>
-        <span className={`${styles.lifecycle} ${styles[run.lifecycle_status]}`}>
-          <i aria-hidden="true" /> {LIFECYCLE_LABELS[run.lifecycle_status]}
-        </span>
+        <div className={styles.overviewBadges}>
+          {regressionBadge && (
+            <span className={`${styles.regressionBadge} ${styles[regressionBadge.status]}`}>
+              {regressionBadge.label}
+            </span>
+          )}
+          <span className={`${styles.lifecycle} ${styles[run.lifecycle_status]}`}>
+            <i aria-hidden="true" /> {LIFECYCLE_LABELS[run.lifecycle_status]}
+          </span>
+        </div>
       </div>
 
       <div className={styles.progressCopy}>
@@ -687,7 +850,24 @@ function RunOverview({ run, progressPercent }: { run: TestRunSummary; progressPe
         )}
         <span>PACK <strong>{run.pack_id}</strong></span>
         <span>OUTCOMES <strong>Observed results only</strong></span>
+        <span className={styles.baselineAction}>
+          {run.is_baseline ? (
+            <span className={styles.baselineState}>Baseline</span>
+          ) : (
+            <button
+              type="button"
+              className={styles.baselineButton}
+              onClick={onSetBaseline}
+              disabled={run.lifecycle_status !== "completed" || isSettingBaseline}
+            >
+              {isSettingBaseline ? "Setting…" : "Set as baseline"}
+            </button>
+          )}
+        </span>
       </div>
+      {baselineError && (
+        <p className={styles.baselineError} role="alert">{baselineError}</p>
+      )}
     </section>
   );
 }
@@ -779,6 +959,7 @@ function ResultDetail({
           >
             {TAB_LABELS[tab]}
             {detail && tab === "checks" && <span>{detail.checks.length}</span>}
+            {detail && tab === "failures" && <span>{detail.failures.length}</span>}
           </button>
         ))}
       </div>
@@ -803,9 +984,239 @@ function ResultDetail({
 
 function DetailTabContent({ activeTab, detail }: { activeTab: DetailTab; detail: ScenarioRunResult }) {
   if (activeTab === "checks") return <ChecksView checks={detail.checks} error={detail.error} />;
+  if (activeTab === "metrics") return <MetricsView metrics={detail.metrics} />;
+  if (activeTab === "failures") return <FailuresView failures={detail.failures} />;
   if (activeTab === "transcript") return <TranscriptView detail={detail} />;
   if (activeTab === "trace") return <ToolTraceView detail={detail} />;
   return <CoverageView detail={detail} />;
+}
+
+function MetricsView({ metrics }: { metrics: MetricScore[] }) {
+  if (metrics.length === 0) return <p className={styles.emptyTab}>No metrics were computed.</p>;
+
+  return (
+    <div className={styles.metricGrid}>
+      {metrics.map((metric) => (
+        <article className={`${styles.metricCard} ${styles[metric.status]}`} key={metric.dimension}>
+          <div className={styles.metricHead}>
+            <h3>{METRIC_LABELS[metric.dimension]}</h3>
+            <span className={styles.metricStatusTag}>{METRIC_STATUS_LABELS[metric.status]}</span>
+          </div>
+          <strong className={styles.metricScore}>{metric.score === null ? "—" : metric.score}</strong>
+          <p>{metric.reason}</p>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function FailuresView({ failures }: { failures: Failure[] }) {
+  const [filter, setFilter] = useState<FailureFilter>("all");
+  const filtered = filter === "all" ? failures : failures.filter((failure) => failure.severity === filter);
+
+  if (failures.length === 0) return <p className={styles.emptyTab}>No failures were recorded.</p>;
+
+  return (
+    <div>
+      <div className={styles.failureFilters} role="tablist" aria-label="Filter failures by severity">
+        {FAILURE_FILTERS.map((option) => (
+          <button
+            type="button"
+            key={option}
+            className={filter === option ? styles.activeFilter : ""}
+            onClick={() => setFilter(option)}
+            aria-pressed={filter === option}
+          >
+            {option === "all" ? "All" : SEVERITY_LABELS[option]}
+          </button>
+        ))}
+      </div>
+      {filtered.length === 0 ? (
+        <p className={styles.emptyTab}>No failures at this severity.</p>
+      ) : (
+        <div className={styles.failureList}>
+          {filtered.map((failure, index) => (
+            <FailureCard failure={failure} key={index} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function FailureCard({ failure, scenarioId }: { failure: Failure; scenarioId?: string }) {
+  return (
+    <article className={`${styles.failureCard} ${styles[failure.severity]}`}>
+      <div className={styles.failureHeading}>
+        <strong>{scenarioId ? `${scenarioId} · ${failure.title}` : failure.title}</strong>
+        <span>{SEVERITY_LABELS[failure.severity]}</span>
+      </div>
+      {failure.turn !== null && <p className={styles.failureTurn}>Turn {failure.turn}</p>}
+      <dl className={styles.failureGrid}>
+        <dt>Expected</dt>
+        <dd>{failure.expected}</dd>
+        <dt>Actual</dt>
+        <dd>{failure.actual}</dd>
+        <dt>Suggestion</dt>
+        <dd>{failure.suggestion}</dd>
+      </dl>
+    </article>
+  );
+}
+
+function RegressionView({
+  response,
+  isLoading,
+  error,
+}: {
+  response: RegressionComparisonResponse | null;
+  isLoading: boolean;
+  error: string | null;
+}) {
+  if (isLoading) {
+    return (
+      <section className={styles.regressionSection}>
+        <LoadingBlock label="Loading regression comparison…" />
+      </section>
+    );
+  }
+  if (error) {
+    return (
+      <section className={styles.regressionSection}>
+        <div className={styles.detailError} role="alert">{error}</div>
+      </section>
+    );
+  }
+  if (!response || response.status === "no_baseline") {
+    return (
+      <section className={styles.regressionSection}>
+        <div className={styles.regressionEmpty}>
+          <p className="eyebrow">NO BASELINE SET</p>
+          <h3>No baseline set</h3>
+          <p>Set a completed run as baseline to compare future reliability changes.</p>
+        </div>
+      </section>
+    );
+  }
+  if (response.status === "is_baseline") {
+    return (
+      <section className={styles.regressionSection}>
+        <div className={styles.regressionEmpty}>
+          <p className="eyebrow">BASELINE</p>
+          <h3>This run is the current baseline.</h3>
+          <p>Run the pack again after changing agent behavior to compare it against this run.</p>
+        </div>
+      </section>
+    );
+  }
+  if (response.status === "incompatible" || !response.comparison) {
+    return (
+      <section className={styles.regressionSection}>
+        <div className={styles.regressionEmpty}>
+          <p className="eyebrow">INCOMPATIBLE BASELINE</p>
+          <h3>The baseline run isn&apos;t comparable.</h3>
+          <p>
+            The baseline was recorded against a different scenario set and can&apos;t be compared
+            to this run.
+          </p>
+        </div>
+      </section>
+    );
+  }
+
+  const comparison = response.comparison;
+
+  return (
+    <section className={styles.regressionSection} aria-label="Regression comparison">
+      <RegressionSummary comparison={comparison} />
+      <MetricDeltaTable changes={comparison.metric_changes} />
+      <div className={styles.failureDiffGrid}>
+        <FailureDiffColumn
+          title="New Failures"
+          tone="fail"
+          entries={comparison.new_failures}
+          emptyLabel="No new failures."
+        />
+        <FailureDiffColumn
+          title="Resolved"
+          tone="pass"
+          entries={comparison.resolved_failures}
+          emptyLabel="Nothing resolved."
+        />
+        <FailureDiffColumn
+          title="Persistent"
+          tone="warning"
+          entries={comparison.persistent_failures}
+          emptyLabel="No persistent failures."
+        />
+      </div>
+    </section>
+  );
+}
+
+function RegressionSummary({ comparison }: { comparison: RegressionComparison }) {
+  const delta = comparison.score_delta;
+  return (
+    <div className={`${styles.regressionSummary} ${styles[comparison.status]}`}>
+      <span className={styles.regressionStatusTag}>{REGRESSION_STATUS_LABELS[comparison.status]}</span>
+      <div className={styles.regressionScoreRow}>
+        <span>{comparison.baseline_score}</span>
+        <i aria-hidden="true">→</i>
+        <span>{comparison.current_score}</span>
+        <strong>{delta > 0 ? `+${delta}` : delta}</strong>
+      </div>
+    </div>
+  );
+}
+
+function MetricDeltaTable({ changes }: { changes: MetricComparison[] }) {
+  return (
+    <div className={styles.metricDeltaTable}>
+      {changes.map((change) => (
+        <div className={`${styles.metricDeltaRow} ${styles[change.status]}`} key={change.dimension}>
+          <span className={styles.metricDeltaLabel}>{METRIC_LABELS[change.dimension]}</span>
+          <span className={styles.metricDeltaValues}>
+            {change.baseline_score === null ? "—" : change.baseline_score}
+            <i aria-hidden="true">→</i>
+            {change.current_score === null ? "—" : change.current_score}
+          </span>
+          <strong className={styles.metricDeltaChange}>
+            {change.delta === null ? "N/A" : change.delta > 0 ? `+${change.delta}` : change.delta}
+          </strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function FailureDiffColumn({
+  title,
+  tone,
+  entries,
+  emptyLabel,
+}: {
+  title: string;
+  tone: "fail" | "pass" | "warning";
+  entries: ScenarioFailure[];
+  emptyLabel: string;
+}) {
+  return (
+    <section className={`${styles.failureDiffColumn} ${styles[tone]}`}>
+      <div className={styles.failureDiffHeading}>
+        <h3>{title}</h3>
+        <span>{entries.length}</span>
+      </div>
+      {entries.length === 0 ? (
+        <p className={styles.emptyTab}>{emptyLabel}</p>
+      ) : (
+        <div className={styles.failureList}>
+          {entries.map((entry, index) => (
+            <FailureCard scenarioId={entry.scenario_id} failure={entry.failure} key={index} />
+          ))}
+        </div>
+      )}
+    </section>
+  );
 }
 
 function ChecksView({ checks, error }: { checks: EvaluationCheck[]; error: ScenarioRunResult["error"] }) {

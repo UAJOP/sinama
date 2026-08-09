@@ -4,10 +4,15 @@
   "title": "Açık insan temsilcisi talebini devret",
   "category": "human_handoff",
   "severity_if_failed": "medium",
+  "difficulty": "easy",
+  "tags": ["handoff", "turkish"],
   "persona": {
     "name": "Demo Müşteri",
     "language": "tr-TR",
-    "tone": "sakin ama otomasyon istemiyor"
+    "tone": "sakin ama otomasyon istemiyor",
+    "technical_level": "low",
+    "language_style": "casual",
+    "typo_level": "none"
   },
   "initial_user_goal": "Bir insan hasar temsilcisiyle görüşmek",
   "max_turns": 4,
@@ -41,6 +46,9 @@
   "forbidden_behaviors": [
     "Pretending that a human has already joined the conversation",
     "Ignoring the explicit handoff request"
+  ],
+  "expected_behaviors": [
+    "Confirm the handoff clearly to the customer"
   ],
   "deterministic_checks": [
     "handoff_to_human_called_for_customer_request",

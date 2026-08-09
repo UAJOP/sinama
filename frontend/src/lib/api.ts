@@ -10,7 +10,12 @@ export type ScenarioCategory =
   | "coverage_safety"
   | "privacy"
   | "human_handoff"
-  | "prompt_injection";
+  | "prompt_injection"
+  | "context_retention"
+  | "ambiguous_intent"
+  | "turkish_noise"
+  | "repeated_request"
+  | "failed_tool_recovery";
 
 export type ToolName =
   | "lookup_policy"
@@ -90,6 +95,7 @@ export interface TestRunSummary {
   aggregate: RunAggregate;
   completed_scenarios: number;
   total_scenarios: number;
+  is_baseline: boolean;
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
@@ -120,20 +126,101 @@ export interface EvaluationEvidence {
   matching_event: ToolEvent | null;
   offending_event: ToolEvent | null;
   condition: string | null;
+  tool_call_count: number | null;
+  max_allowed: number | null;
+  assistant_message_index: number | null;
+  matched_phrase: string | null;
 }
+
+export type EvaluationCheckType =
+  | "required_tool_call"
+  | "tool_argument_constraint"
+  | "forbidden_tool_call"
+  | "tool_call_count"
+  | "forbidden_phrase"
+  | "required_phrase"
+  | "possible_loop";
+
+export type EvaluationCheckCategory =
+  | "required_tool_missing"
+  | "tool_argument_mismatch"
+  | "tool_call_policy_violation"
+  | "excessive_tool_calls"
+  | "forbidden_phrase_detected"
+  | "required_phrase_missing"
+  | "possible_loop_detected";
 
 export interface EvaluationCheck {
   check_id: string;
-  type: "required_tool_call" | "tool_argument_constraint" | "forbidden_tool_call";
+  type: EvaluationCheckType;
   status: "pass" | "fail";
-  category:
-    | "required_tool_missing"
-    | "tool_argument_mismatch"
-    | "tool_call_policy_violation"
-    | null;
+  category: EvaluationCheckCategory | null;
   severity: Severity | null;
   reason: string;
   evidence: EvaluationEvidence;
+}
+
+export type MetricDimension =
+  | "goal_completion"
+  | "tool_usage"
+  | "handoff"
+  | "safety"
+  | "conversation_quality";
+
+export type MetricStatus = "pass" | "warning" | "fail" | "not_applicable";
+
+export interface MetricScore {
+  dimension: MetricDimension;
+  score: number | null;
+  status: MetricStatus;
+  reason: string;
+}
+
+export interface Failure {
+  type: EvaluationCheckType;
+  severity: Severity;
+  turn: number | null;
+  title: string;
+  description: string;
+  expected: string;
+  actual: string;
+  suggestion: string;
+}
+
+export type RegressionStatus = "improved" | "stable" | "regression";
+export type MetricComparisonStatus = "improved" | "stable" | "regressed" | "not_applicable";
+export type ComparisonAvailability = "no_baseline" | "is_baseline" | "incompatible" | "available";
+
+export interface MetricComparison {
+  dimension: MetricDimension;
+  baseline_score: number | null;
+  current_score: number | null;
+  delta: number | null;
+  status: MetricComparisonStatus;
+}
+
+export interface ScenarioFailure {
+  scenario_id: string;
+  failure: Failure;
+}
+
+export interface RegressionComparison {
+  baseline_run_id: string;
+  current_run_id: string;
+  pack_id: string;
+  baseline_score: number;
+  current_score: number;
+  score_delta: number;
+  status: RegressionStatus;
+  metric_changes: MetricComparison[];
+  new_failures: ScenarioFailure[];
+  resolved_failures: ScenarioFailure[];
+  persistent_failures: ScenarioFailure[];
+}
+
+export interface RegressionComparisonResponse {
+  status: ComparisonAvailability;
+  comparison: RegressionComparison | null;
 }
 
 export interface TranscriptTurn {
@@ -166,6 +253,8 @@ export interface ScenarioRunResult {
   tool_trace: ToolEvent[];
   turns_executed: number;
   unscored_expectations: string[];
+  metrics: MetricScore[];
+  failures: Failure[];
   error: ScenarioExecutionError | null;
 }
 
@@ -310,4 +399,15 @@ export function getScenarioRunResult(
     method: "GET",
     signal,
   });
+}
+
+export function setRunBaseline(runId: string, signal?: AbortSignal): Promise<TestRunSummary> {
+  return request(`/api/runs/${runId}/baseline`, { method: "POST", signal });
+}
+
+export function getRunComparison(
+  runId: string,
+  signal?: AbortSignal,
+): Promise<RegressionComparisonResponse> {
+  return request(`/api/runs/${runId}/comparison`, { method: "GET", signal });
 }

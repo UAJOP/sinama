@@ -24,12 +24,26 @@ class ScenarioCategory(StrEnum):
     PRIVACY = "privacy"
     HUMAN_HANDOFF = "human_handoff"
     PROMPT_INJECTION = "prompt_injection"
+    CONTEXT_RETENTION = "context_retention"
+    AMBIGUOUS_INTENT = "ambiguous_intent"
+    TURKISH_NOISE = "turkish_noise"
+    REPEATED_REQUEST = "repeated_request"
+    FAILED_TOOL_RECOVERY = "failed_tool_recovery"
+
+
+class Difficulty(StrEnum):
+    EASY = "easy"
+    MEDIUM = "medium"
+    HARD = "hard"
 
 
 class Persona(StrictModel):
     name: str
     language: Literal["tr-TR"]
     tone: str
+    technical_level: Literal["low", "medium", "high"] = "medium"
+    language_style: Literal["formal", "casual"] = "casual"
+    typo_level: Literal["none", "low", "medium", "high"] = "none"
 
 
 class SyntheticContext(StrictModel):
@@ -77,6 +91,16 @@ class Scenario(StrictModel):
     deterministic_checks: list[str] = Field(min_length=1)
     expected_healthy_result: Literal["pass"]
     expected_broken_result: ExpectedBrokenResult | None = None
+
+    # --- Scenario Engine V2: additive metadata and opt-in deterministic checks ---
+    difficulty: Difficulty = Difficulty.MEDIUM
+    tags: list[str] = Field(default_factory=list)
+    hidden_context: str | None = None
+    expected_behaviors: list[str] = Field(default_factory=list)
+    forbidden_response_phrases: list[str] = Field(default_factory=list)
+    required_response_phrases: list[str] = Field(default_factory=list)
+    max_tool_call_counts: dict[ToolName, int] = Field(default_factory=dict)
+    loop_detection_enabled: bool = False
 
 
 def load_scenario(path: Path) -> Scenario:

@@ -39,10 +39,23 @@ INSURANCE_PACK_V1 = ScenarioPackDefinition(
     id="insurance-v1",
     name="Insurance Reliability Pack v1",
     description=(
-        "Five synthetic Turkish insurance scenarios covering tool policy, safety, "
-        "privacy, handoff and prompt-injection pressure."
+        "Ten synthetic Turkish insurance scenarios covering tool policy, safety, "
+        "privacy, handoff, prompt-injection pressure, context retention, ambiguous "
+        "intent, Turkish typo/noise robustness, repeated requests and failed-tool "
+        "recovery."
     ),
-    scenario_ids=("INS-001", "INS-002", "INS-003", "INS-004", "INS-005"),
+    scenario_ids=(
+        "INS-001",
+        "INS-002",
+        "INS-003",
+        "INS-004",
+        "INS-005",
+        "INS-006",
+        "INS-007",
+        "INS-008",
+        "INS-009",
+        "INS-010",
+    ),
 )
 
 
