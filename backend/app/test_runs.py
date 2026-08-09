@@ -16,6 +16,7 @@ from app.agent_adapters import AgentAdapter, DemoAgentAdapter
 from app.evaluator import EvaluationStatus
 from app.http_agent import ExternalAgentConfiguration, build_http_agent_adapter
 from app.models import AgentMode, AgentTarget, StrictModel
+from app.regression import ComparisonAvailability, RegressionComparisonResponse, build_comparison
 from app.scenario_packs import (
     ScenarioPackId,
     ScenarioPackRegistry,
@@ -69,6 +70,7 @@ class TestRunSummary(StrictModel):
     aggregate: RunAggregateCounts
     completed_scenarios: int = Field(ge=0)
     total_scenarios: int = Field(ge=1)
+    is_baseline: bool = False
     created_at: datetime
     started_at: datetime | None = None
     completed_at: datetime | None = None
@@ -114,6 +116,10 @@ class InvalidRunAgentConfigurationError(ValueError):
     pass
 
 
+class RunNotCompletedError(ValueError):
+    pass
+
+
 class RunStore:
     """Thread-safe, bounded in-memory storage for single-process demo runs."""
 
@@ -122,6 +128,7 @@ class RunStore:
             raise ValueError("max_runs must be at least 1")
         self._max_runs = max_runs
         self._runs: OrderedDict[UUID, StoredTestRun] = OrderedDict()
+        self._baselines: dict[str, UUID] = {}
         self._lock = RLock()
 
     def create_run(
@@ -193,9 +200,53 @@ class RunStore:
                 raise ScenarioResultNotFoundError(scenario_id)
             return result.model_copy(deep=True)
 
+    def set_baseline(self, run_id: UUID) -> TestRunSummary:
+        with self._lock:
+            record = self._get_locked(run_id)
+            if record.lifecycle_status is not TestRunLifecycleStatus.COMPLETED:
+                raise RunNotCompletedError("Only a completed run can be set as a baseline.")
+            self._baselines[record.pack.id] = run_id
+            return self._summary_locked(record)
+
+    def get_comparison(self, run_id: UUID) -> RegressionComparisonResponse:
+        with self._lock:
+            record = self._get_locked(run_id)
+            baseline_id = self._baselines.get(record.pack.id)
+            if baseline_id is None:
+                return RegressionComparisonResponse(status=ComparisonAvailability.NO_BASELINE)
+            if baseline_id == run_id:
+                return RegressionComparisonResponse(status=ComparisonAvailability.IS_BASELINE)
+
+            baseline_record = self._runs.get(baseline_id)
+            if baseline_record is None:
+                # The baseline run aged out of the bounded store - self-heal the
+                # stale mapping instead of leaving a dangling reference around.
+                del self._baselines[record.pack.id]
+                return RegressionComparisonResponse(status=ComparisonAvailability.NO_BASELINE)
+
+            baseline_scenario_ids = {
+                scenario.scenario_id for scenario in baseline_record.pack.scenarios
+            }
+            current_scenario_ids = {scenario.scenario_id for scenario in record.pack.scenarios}
+            if baseline_scenario_ids != current_scenario_ids:
+                return RegressionComparisonResponse(status=ComparisonAvailability.INCOMPATIBLE)
+
+            comparison = build_comparison(
+                baseline_run_id=baseline_id,
+                current_run_id=run_id,
+                pack_id=record.pack.id,
+                baseline_results=baseline_record.results,
+                current_results=record.results,
+            )
+            return RegressionComparisonResponse(
+                status=ComparisonAvailability.AVAILABLE,
+                comparison=comparison,
+            )
+
     def clear(self) -> None:
         with self._lock:
             self._runs.clear()
+            self._baselines.clear()
 
     def __len__(self) -> int:
         with self._lock:
@@ -220,6 +271,7 @@ class RunStore:
             aggregate=aggregate,
             completed_scenarios=len(record.results),
             total_scenarios=record.pack.scenario_count,
+            is_baseline=self._baselines.get(record.pack.id) == record.run_id,
             created_at=record.created_at,
             started_at=record.started_at,
             completed_at=record.completed_at,

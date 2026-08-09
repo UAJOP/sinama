@@ -95,6 +95,7 @@ export interface TestRunSummary {
   aggregate: RunAggregate;
   completed_scenarios: number;
   total_scenarios: number;
+  is_baseline: boolean;
   created_at: string;
   started_at: string | null;
   completed_at: string | null;
@@ -184,6 +185,42 @@ export interface Failure {
   expected: string;
   actual: string;
   suggestion: string;
+}
+
+export type RegressionStatus = "improved" | "stable" | "regression";
+export type MetricComparisonStatus = "improved" | "stable" | "regressed" | "not_applicable";
+export type ComparisonAvailability = "no_baseline" | "is_baseline" | "incompatible" | "available";
+
+export interface MetricComparison {
+  dimension: MetricDimension;
+  baseline_score: number | null;
+  current_score: number | null;
+  delta: number | null;
+  status: MetricComparisonStatus;
+}
+
+export interface ScenarioFailure {
+  scenario_id: string;
+  failure: Failure;
+}
+
+export interface RegressionComparison {
+  baseline_run_id: string;
+  current_run_id: string;
+  pack_id: string;
+  baseline_score: number;
+  current_score: number;
+  score_delta: number;
+  status: RegressionStatus;
+  metric_changes: MetricComparison[];
+  new_failures: ScenarioFailure[];
+  resolved_failures: ScenarioFailure[];
+  persistent_failures: ScenarioFailure[];
+}
+
+export interface RegressionComparisonResponse {
+  status: ComparisonAvailability;
+  comparison: RegressionComparison | null;
 }
 
 export interface TranscriptTurn {
@@ -362,4 +399,15 @@ export function getScenarioRunResult(
     method: "GET",
     signal,
   });
+}
+
+export function setRunBaseline(runId: string, signal?: AbortSignal): Promise<TestRunSummary> {
+  return request(`/api/runs/${runId}/baseline`, { method: "POST", signal });
+}
+
+export function getRunComparison(
+  runId: string,
+  signal?: AbortSignal,
+): Promise<RegressionComparisonResponse> {
+  return request(`/api/runs/${runId}/comparison`, { method: "GET", signal });
 }

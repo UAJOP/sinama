@@ -14,6 +14,7 @@ from app.agent_adapters import AgentAdapter, DemoAgentAdapter
 from app.http_agent import ExternalAgentConfiguration
 from app.main import app
 from app.models import AgentMode, AgentTarget
+from app.regression import ComparisonAvailability, RegressionStatus
 from app.scenario_packs import (
     ScenarioPackNotFoundError,
     ScenarioPackRegistry,
@@ -21,6 +22,7 @@ from app.scenario_packs import (
 from app.scenario_runner import RunStatus, ScenarioRunResult, scenario_runner
 from app.scenarios import Scenario
 from app.test_runs import (
+    RunNotCompletedError,
     RunService,
     RunStore,
     ScenarioResultNotFoundError,
@@ -425,3 +427,157 @@ def test_run_api_returns_404_for_unknown_run_and_result(client: TestClient) -> N
     assert unknown_run.json() == {"detail": "Test run not found"}
     assert unknown_result.status_code == 404
     assert unknown_result.json() == {"detail": "Scenario result not found"}
+
+
+async def two_completed_runs(
+    baseline_mode: AgentMode, current_mode: AgentMode
+) -> tuple[RunStore, UUID, UUID]:
+    store = RunStore()
+    service = RunService(store=store)
+    baseline = await service.create_run("insurance-v1", baseline_mode)
+    await service.wait_for_completion(baseline.run_id)
+    current = await service.create_run("insurance-v1", current_mode)
+    await service.wait_for_completion(current.run_id)
+    return store, baseline.run_id, current.run_id
+
+
+def test_get_comparison_with_no_baseline_returns_no_baseline_status() -> None:
+    store, payload = asyncio.run(execute_pack(AgentMode.HEALTHY))
+    run_id = UUID(str(payload["run_id"]))
+
+    response = store.get_comparison(run_id)
+
+    assert response.status is ComparisonAvailability.NO_BASELINE
+    assert response.comparison is None
+
+
+def test_set_baseline_on_missing_run_raises_not_found() -> None:
+    store = RunStore()
+
+    with pytest.raises(RunNotFoundError):
+        store.set_baseline(uuid4())
+
+
+def test_set_baseline_on_incomplete_run_raises_not_completed() -> None:
+    store = RunStore()
+    pack = ScenarioPackRegistry().get_pack("insurance-v1")
+    run = store.create_run(pack, AgentMode.HEALTHY)
+
+    with pytest.raises(RunNotCompletedError):
+        store.set_baseline(run.run_id)
+
+
+def test_set_baseline_marks_run_and_comparison_reports_is_baseline() -> None:
+    store, payload = asyncio.run(execute_pack(AgentMode.HEALTHY))
+    run_id = UUID(str(payload["run_id"]))
+
+    summary = store.set_baseline(run_id)
+
+    assert summary.is_baseline is True
+    assert store.get_run(run_id).is_baseline is True
+    response = store.get_comparison(run_id)
+    assert response.status is ComparisonAvailability.IS_BASELINE
+    assert response.comparison is None
+
+
+def test_changing_baseline_replaces_previous_one() -> None:
+    store, first_id, second_id = asyncio.run(
+        two_completed_runs(AgentMode.HEALTHY, AgentMode.HEALTHY)
+    )
+
+    store.set_baseline(first_id)
+    assert store.get_run(first_id).is_baseline is True
+
+    store.set_baseline(second_id)
+    assert store.get_run(second_id).is_baseline is True
+    assert store.get_run(first_id).is_baseline is False
+
+
+def test_comparison_detects_regression_from_healthy_baseline_to_broken_current() -> None:
+    store, baseline_id, current_id = asyncio.run(
+        two_completed_runs(AgentMode.HEALTHY, AgentMode.BROKEN_PREMATURE_SUBMISSION)
+    )
+    store.set_baseline(baseline_id)
+
+    response = store.get_comparison(current_id)
+
+    assert response.status is ComparisonAvailability.AVAILABLE
+    assert response.comparison is not None
+    assert response.comparison.baseline_run_id == baseline_id
+    assert response.comparison.current_run_id == current_id
+    assert response.comparison.status is RegressionStatus.REGRESSION
+    assert response.comparison.score_delta < 0
+    assert response.comparison.new_failures
+
+
+def test_comparison_detects_improvement_from_broken_baseline_to_healthy_current() -> None:
+    store, baseline_id, current_id = asyncio.run(
+        two_completed_runs(AgentMode.BROKEN_PREMATURE_SUBMISSION, AgentMode.HEALTHY)
+    )
+    store.set_baseline(baseline_id)
+
+    response = store.get_comparison(current_id)
+
+    assert response.comparison is not None
+    assert response.comparison.status is RegressionStatus.IMPROVED
+    assert response.comparison.score_delta > 0
+    assert response.comparison.resolved_failures
+
+
+def test_comparison_is_incompatible_when_scenario_set_differs() -> None:
+    store = RunStore()
+    pack = ScenarioPackRegistry().get_pack("insurance-v1")
+    truncated_pack = pack.model_copy(update={"scenarios": pack.scenarios[:5]})
+
+    baseline_run = store.create_run(pack, AgentMode.HEALTHY)
+    store.mark_running(baseline_run.run_id)
+    store.mark_completed(baseline_run.run_id)
+    store.set_baseline(baseline_run.run_id)
+
+    current_run = store.create_run(truncated_pack, AgentMode.HEALTHY)
+    store.mark_running(current_run.run_id)
+    store.mark_completed(current_run.run_id)
+
+    response = store.get_comparison(current_run.run_id)
+
+    assert response.status is ComparisonAvailability.INCOMPATIBLE
+    assert response.comparison is None
+
+
+def test_baseline_and_comparison_api_flow(client: TestClient) -> None:
+    baseline_created = client.post(
+        "/api/runs",
+        json={"pack_id": "insurance-v1", "agent_mode": "healthy"},
+    ).json()
+    wait_for_api_run(client, baseline_created["run_id"])
+
+    baseline_response = client.post(f"/api/runs/{baseline_created['run_id']}/baseline")
+    assert baseline_response.status_code == 200
+    assert baseline_response.json()["is_baseline"] is True
+
+    current_created = client.post(
+        "/api/runs",
+        json={"pack_id": "insurance-v1", "agent_mode": "broken_premature_submission"},
+    ).json()
+    wait_for_api_run(client, current_created["run_id"])
+
+    comparison_response = client.get(f"/api/runs/{current_created['run_id']}/comparison")
+    assert comparison_response.status_code == 200
+    payload = comparison_response.json()
+    assert payload["status"] == "available"
+    assert payload["comparison"]["status"] == "regression"
+    assert payload["comparison"]["new_failures"]
+
+
+def test_baseline_api_returns_404_for_unknown_run(client: TestClient) -> None:
+    response = client.post(f"/api/runs/{uuid4()}/baseline")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Test run not found"}
+
+
+def test_comparison_api_returns_404_for_unknown_run(client: TestClient) -> None:
+    response = client.get(f"/api/runs/{uuid4()}/comparison")
+
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Test run not found"}
