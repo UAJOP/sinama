@@ -8,7 +8,7 @@ A Turkish-first reliability lab for testing customer-service AI agents before pr
 
 ![SINAMA](docs/assets/readme/sinama-case-study-hero.webp)
 
-SINAMA runs a synthetic Turkish insurance claim-intake agent through five scripted multi-turn scenarios, then deterministically checks whether the agent called the required tools, avoided forbidden actions and used the expected structured arguments — then exposes inspectable evidence when the contract is violated.
+SINAMA runs a synthetic Turkish insurance claim-intake agent through ten scripted multi-turn scenarios, then deterministically checks whether the agent called the required tools, avoided forbidden actions, used the expected structured arguments, stayed within tool-call/response-phrase constraints and avoided repeating itself — then exposes inspectable evidence, a per-dimension metric breakdown and structured failure objects when the contract is violated.
 
 ## Reliability proof
 
@@ -16,12 +16,12 @@ The built-in `Insurance Reliability Pack v1` ships with an intentionally broken 
 
 | Agent mode                   | Total | Pass | Fail | Error |
 | ----------------------------- | ----: | ---: | ---: | ----: |
-| Healthy                       |     5 |    5 |    0 |     0 |
-| Broken: Premature Submission  |     5 |    3 |    2 |     0 |
+| Healthy                       |    10 |   10 |    0 |     0 |
+| Broken: Premature Submission  |    10 |    5 |    5 |     0 |
 
-`INS-001` and `INS-005` fail at **HIGH** severity in Broken mode.
+`INS-001`, `INS-005`, `INS-006` and `INS-008` fail at **HIGH** severity, and `INS-009` fails at **MEDIUM** severity in Broken mode — all five for the same underlying regression: premature `submit_claim` before the required `damage_photo` exists.
 
-![Test run showing 5 total, 3 pass, 2 fail, 0 error](docs/assets/readme/sinama-runs-broken.webp)
+![Test run results list showing a mix of pass and fail scenarios with severity and failed-check counts](docs/assets/readme/sinama-runs-broken.webp)
 
 In both scenarios, the synthetic agent calls `submit_claim` before the required `damage_photo` has been collected. The agent doesn't crash and the run doesn't error — it completes normally. What fails is the agent's behavior: SINAMA's deterministic evaluator inspects the observed Tool Trace, detects the forbidden `submit_claim` call for that scenario, and reports the policy violation with the offending event as evidence.
 
@@ -83,8 +83,11 @@ Failure Evidence
 
 ### Reliability Pack
 
-- five synthetic Turkish insurance scenarios (`INS-001`–`INS-005`) involving tool policy, safety/privacy constraints, human handoff and prompt-injection pressure; current scoring remains deterministic tool-contract based
-- deterministic required/forbidden tool-call contracts with exact argument constraints
+- ten synthetic Turkish insurance scenarios (`INS-001`–`INS-010`) covering tool policy, safety/privacy constraints, human handoff, prompt-injection pressure, context retention, ambiguous intent, Turkish typo/noise robustness, repeated-request handling and failed-tool recovery; scoring remains fully deterministic
+- deterministic required/forbidden tool-call contracts with exact argument constraints, tool-call-count limits, forbidden/required response-phrase checks and repeated-response (loop) detection
+- a per-scenario metric breakdown (Goal Completion, Tool Usage, Handoff, Safety, Conversation Quality) — a dimension a scenario never exercises is reported as not applicable rather than a fabricated score
+- structured `Failure` objects per violated check (type, severity, turn, expected vs. actual, a concrete suggestion) instead of a raw check dump
+- best-effort masking of TC kimlik no / phone / card-like digit runs in transcripts and tool arguments before they reach the API response
 - evidence-backed regression detection, not a pass/fail black box
 
 This is an MVP reliability lab, not a production enterprise test-management platform — see [Current limitations](#current-limitations).
@@ -227,10 +230,15 @@ evaluation_scope = deterministic_tool_contract
 SINAMA currently scores:
 
 - required tool calls,
-- forbidden tool calls, and
-- exact structured argument constraints.
+- forbidden tool calls,
+- exact structured argument constraints,
+- tool-call-count limits (a tool called more than an allowed number of times),
+- forbidden/required response phrases (a scenario-declared substring that must not, or must, appear in an assistant turn), and
+- repeated-response detection (three consecutive near-identical assistant turns).
 
-It does **not** currently score general semantic response quality. If a tool is absent, its argument constraints are not evaluated; a required tool produces one missing-tool root cause, while an optional tool remains allowed.
+The last three are opt-in per scenario fixture — a scenario that doesn't declare them produces exactly the same checks it would have before they existed. All of the above remain **deterministic, substring/count-based checks — not semantic understanding**. If a tool is absent, its argument constraints are not evaluated; a required tool produces one missing-tool root cause, while an optional tool remains allowed.
+
+Every scored check also feeds a per-dimension `metrics` breakdown and, for each failed check, a structured `failures` entry (see [Reliability Pack](#reliability-pack)). A dimension is reported `not_applicable` — never a fabricated score — when a scenario doesn't exercise it.
 
 Fixture `deterministic_checks` IDs are descriptive metadata, not executable evaluator configuration. Results expose them unchanged as `declared_checks` and, because the evaluator does not interpret or map ID text, as `unscored_declared_checks`. Even when an ID resembles a structured check, only the generated `checks` array proves what was scored. Natural-language outcomes and forbidden behaviors are returned as `unscored_expectations` — SINAMA does not claim semantic coverage. Semantic/LLM-judge evaluation is roadmap work, not implemented today.
 
@@ -244,7 +252,7 @@ ruff check app tests
 mypy app
 ```
 
-The backend suite currently passes **88/88** (verified locally against this revision).
+The backend suite currently passes **113/113** (verified locally against this revision).
 
 Frontend, from `frontend/`:
 
@@ -260,8 +268,8 @@ pnpm build
 - a backend restart clears all conversation and run history
 - no persistent database (PostgreSQL/Supabase is a later target)
 - no V1 vs V2 agent comparison
-- no regression delta view
-- no semantic/LLM judge — evaluation is deterministic tool-contract only
+- no baseline run / regression delta view
+- no semantic/LLM judge — evaluation remains fully deterministic (tool contracts, tool-call counts, response-phrase and loop-repetition checks)
 - no saved agent connections
 - no authentication
 - no billing
@@ -271,10 +279,10 @@ pnpm build
 
 ## Next
 
-1. PostgreSQL/Supabase persistent run history
-2. V1 vs V2 agent comparison
-3. regression delta reporting
-4. additional high-quality Turkish scenario packs
+1. baseline runs and regression delta reporting, built on the metric breakdown shipped in this revision
+2. PostgreSQL/Supabase persistent run history
+3. V1 vs V2 agent comparison
+4. test suites (grouping scenarios beyond a single pack)
 5. release-readiness report
 
 ## Documentation

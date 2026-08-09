@@ -2,6 +2,7 @@ import asyncio
 import logging
 from enum import StrEnum
 from typing import Literal
+from uuid import UUID
 
 from pydantic import Field
 
@@ -19,6 +20,9 @@ from app.evaluator import (
     EvaluationStatus,
     ScenarioEvaluator,
 )
+from app.failures import Failure, build_failures
+from app.masking import mask_sensitive_text
+from app.metrics import MetricScore, compute_metrics
 from app.models import StrictModel, ToolEvent
 from app.scenarios import Scenario, Severity
 
@@ -69,6 +73,8 @@ class ScenarioRunResult(StrictModel):
     tool_trace: list[ToolEvent] = Field(default_factory=list)
     turns_executed: int = Field(ge=0)
     unscored_expectations: list[str] = Field(default_factory=list)
+    metrics: list[MetricScore] = Field(default_factory=list)
+    failures: list[Failure] = Field(default_factory=list)
     error: ScenarioExecutionError | None = None
 
 
@@ -96,6 +102,8 @@ class ScenarioRunner:
 
         transcript: list[TranscriptTurn] = []
         tool_trace: list[ToolEvent] = []
+        assistant_messages: list[str] = []
+        event_turn: dict[UUID, int] = {}
         turns_executed = 0
 
         try:
@@ -226,9 +234,23 @@ class ScenarioRunner:
                     content=turn.assistant_message,
                 )
             )
+            assistant_messages.append(turn.assistant_message)
+            for event in turn.tool_events:
+                event_turn[event.id] = turns_executed
             tool_trace.extend(turn.tool_events)
 
-        report = self._evaluator.evaluate(scenario, tool_trace)
+        report = self._evaluator.evaluate(scenario, tool_trace, assistant_messages)
+        metrics = compute_metrics(report.checks)
+        failures = build_failures(report.checks, event_turn)
+
+        masked_transcript = [
+            turn.model_copy(update={"content": mask_sensitive_text(turn.content)})
+            for turn in transcript
+        ]
+        masked_tool_trace = [self._mask_tool_event(event) for event in tool_trace]
+        masked_by_id = {event.id: event for event in masked_tool_trace}
+        masked_checks = [self._mask_check(check, masked_by_id) for check in report.checks]
+
         return ScenarioRunResult(
             scenario_id=scenario.id,
             scenario_version=scenario.version,
@@ -239,13 +261,43 @@ class ScenarioRunner:
                 else RunStatus.PASS
             ),
             severity=report.severity,
-            checks=report.checks,
+            checks=masked_checks,
             declared_checks=report.declared_checks,
             unscored_declared_checks=report.unscored_declared_checks,
-            transcript=transcript,
-            tool_trace=tool_trace,
+            metrics=metrics,
+            failures=failures,
+            transcript=masked_transcript,
+            tool_trace=masked_tool_trace,
             turns_executed=turns_executed,
             unscored_expectations=report.unscored_expectations,
+        )
+
+    @staticmethod
+    def _mask_tool_event(event: ToolEvent) -> ToolEvent:
+        masked_arguments = {
+            key: mask_sensitive_text(value) if isinstance(value, str) else value
+            for key, value in event.arguments.items()
+        }
+        return event.model_copy(update={"arguments": masked_arguments})
+
+    @staticmethod
+    def _mask_check(
+        check: EvaluationCheckResult,
+        masked_by_id: dict[UUID, ToolEvent],
+    ) -> EvaluationCheckResult:
+        evidence = check.evidence
+        matching = (
+            masked_by_id.get(evidence.matching_event.id) if evidence.matching_event else None
+        )
+        offending = (
+            masked_by_id.get(evidence.offending_event.id) if evidence.offending_event else None
+        )
+        return check.model_copy(
+            update={
+                "evidence": evidence.model_copy(
+                    update={"matching_event": matching, "offending_event": offending}
+                )
+            }
         )
 
     @staticmethod
@@ -273,7 +325,11 @@ class ScenarioRunner:
                 list(scenario.deterministic_checks) if scenario is not None else []
             ),
             unscored_expectations=(
-                [*scenario.expected_outcomes, *scenario.forbidden_behaviors]
+                [
+                    *scenario.expected_outcomes,
+                    *scenario.forbidden_behaviors,
+                    *scenario.expected_behaviors,
+                ]
                 if scenario is not None
                 else []
             ),

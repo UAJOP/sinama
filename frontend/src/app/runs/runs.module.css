@@ -354,6 +354,40 @@
 .coverageWarning { border-color: #594324; background: #1b1710; }
 .coverageWarning > div > span { color: var(--amber); background: #352817; }
 
+.metricGrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+.metricCard { padding: 14px; border: 1px solid #263d36; border-radius: 11px; background: #0b1714; }
+.metricHead { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.metricHead h3 { margin: 0; color: #c2d1cd; font-size: 11px; }
+.metricStatusTag { padding: 4px 8px; border-radius: 999px; color: #9db1ab; background: #182824; font: 800 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; }
+.metricScore { display: block; margin: 10px 0 0; color: var(--text); font: 800 22px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.metricCard p { margin: 8px 0 0; color: #8ba49c; font-size: 10px; line-height: 1.5; }
+.metricCard.pass .metricScore { color: var(--green); }
+.metricCard.pass .metricStatusTag { border: 1px solid #32664f; color: var(--green); background: #123025; }
+.metricCard.warning .metricScore { color: var(--amber); }
+.metricCard.warning .metricStatusTag { border: 1px solid #715027; color: var(--amber); background: #372718; }
+.metricCard.fail .metricScore { color: var(--red); }
+.metricCard.fail .metricStatusTag { border: 1px solid #71413b; color: var(--red); background: #351917; }
+.metricCard.not_applicable .metricScore { color: #5b746c; }
+
+.failureFilters { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 12px; }
+.failureFilters button { padding: 6px 10px; border: 1px solid #263c36; border-radius: 999px; color: #9db1ab; background: #0b1614; cursor: pointer; font: 700 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; }
+.failureFilters button:hover { color: #b6c7c2; }
+.failureFilters button.activeFilter { border-color: var(--green); color: var(--green); background: #123126; }
+.failureList { display: grid; gap: 10px; }
+.failureCard { padding: 12px; border: 1px solid #274239; border-radius: 11px; background: #0b1714; }
+.failureCard.critical { border-color: #7a3b3b; background: #241413; }
+.failureCard.high { border-color: #725025; background: #211a12; }
+.failureCard.medium { border-color: #5c5527; background: #1c1a11; }
+.failureCard.low { border-color: #2a433c; }
+.failureHeading { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.failureHeading strong { color: #bed0ca; font-size: 11px; line-height: 1.45; }
+.failureHeading span { color: #6e887f; font: 800 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; white-space: nowrap; }
+.failureTurn { margin: 6px 0 0; color: #6e887f; font-size: 9px; }
+.failureGrid { display: grid; grid-template-columns: minmax(80px, 0.3fr) minmax(0, 1fr); margin: 9px 0 0; padding: 9px 0 0; border-top: 1px solid rgba(88, 239, 175, 0.1); }
+.failureGrid dt, .failureGrid dd { padding: 3px 0; overflow-wrap: anywhere; font: 9px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.failureGrid dt { color: #5d776e; }
+.failureGrid dd { margin: 0; color: #a8bcb5; }
+
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes lifecyclePulse { to { opacity: 0.5; transform: scale(0.78); } }
 

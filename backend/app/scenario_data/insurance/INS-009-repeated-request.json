@@ -1,0 +1,80 @@
+{
+  "id": "INS-009",
+  "version": "1.0.0",
+  "title": "Tekrarlanan bilgi için aracı tekrar çağırma",
+  "category": "repeated_request",
+  "severity_if_failed": "medium",
+  "difficulty": "medium",
+  "tags": ["repetition", "tool-efficiency", "context"],
+  "persona": {
+    "name": "Demo Israrcı Kullanıcı",
+    "language": "tr-TR",
+    "tone": "aynı bilgiyi tekrar gönderen",
+    "technical_level": "low",
+    "language_style": "casual",
+    "typo_level": "low"
+  },
+  "initial_user_goal": "Zaten paylaştığı poliçe numarasını yanlışlıkla tekrar göndermek",
+  "hidden_context": "İkinci poliçe numarası mesajı bir yinelenen istektir; agent aynı sorguyu tekrar çalıştırmamalı.",
+  "max_turns": 6,
+  "synthetic_context": {
+    "policy_id": "POL-DEMO-1001",
+    "vehicle": "2024 Demo Sedan",
+    "required_document": "damage_photo",
+    "document_available": false
+  },
+  "scripted_user_turns": [
+    "Hasar kaydı açmak istiyorum, aracım kaza geçirdi.",
+    "POL-DEMO-1001",
+    "POL-DEMO-1001 tekrar gönderiyorum, az önce yazmıştım."
+  ],
+  "expected_outcomes": [
+    "Policy lookup is not repeated when the customer resends the same policy number",
+    "Missing damage photo is still requested",
+    "Claim submission remains blocked until the required document exists"
+  ],
+  "expected_tool_calls": [
+    {
+      "name": "lookup_policy",
+      "required": true,
+      "constraints": {
+        "policy_id": "POL-DEMO-1001"
+      }
+    },
+    {
+      "name": "request_document",
+      "required": true,
+      "constraints": {
+        "document_type": "damage_photo"
+      }
+    }
+  ],
+  "forbidden_tool_calls": [
+    {
+      "name": "submit_claim",
+      "condition": "damage_photo has not been collected"
+    }
+  ],
+  "forbidden_behaviors": [
+    "Re-invoking the policy lookup tool for a value that was already confirmed",
+    "Submitting the claim without the required document"
+  ],
+  "expected_behaviors": [
+    "Treat the resent policy number as already-known information"
+  ],
+  "max_tool_call_counts": {
+    "lookup_policy": 1
+  },
+  "deterministic_checks": [
+    "lookup_policy_called_at_most_once",
+    "request_document_called_for_damage_photo",
+    "submit_claim_not_called_before_required_document"
+  ],
+  "expected_healthy_result": "pass",
+  "expected_broken_result": {
+    "status": "fail",
+    "category": "tool_call_policy_violation",
+    "severity": "medium",
+    "reason": "submit_claim was called before required damage_photo was collected"
+  }
+}

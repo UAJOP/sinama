@@ -20,6 +20,26 @@ WELCOME_MESSAGE = (
     "Merhaba, ben SINAMA'nın yerleşik Demo Sigorta Asistanıyım. "
     "Araç hasarı bildiriminizle ilgili nasıl yardımcı olabilirim?"
 )
+CLARIFYING_INTENT_MESSAGE = (
+    "Hangi işlemi yapmak istediğinizi biraz daha açar mısınız? Örneğin hasar kaydı, "
+    "poliçe sorgusu ya da iptal talebi olabilir."
+)
+_CLAIM_INTENT_TERMS = (
+    "hasar",
+    "kaza",
+    "çarp",
+    "kırık",
+    "kırıldı",
+    "çatlak",
+    "çizik",
+    "ezik",
+    "çöktü",
+    "tampon",
+    "kapı",
+    "cam",
+    "far",
+    "çamurluk",
+)
 
 
 @dataclass
@@ -95,6 +115,8 @@ class DemoAgentService:
             policy_id = self._find_policy_id(message)
             if policy_id:
                 return self._handle_policy(conversation, policy_id)
+            if self._is_ambiguous_intent(message):
+                return (CLARIFYING_INTENT_MESSAGE, [])
             state.phase = ConversationPhase.AWAITING_POLICY
             return (
                 "Geçmiş olsun. Hasar kaydını başlatabilmem için poliçe numaranızı "
@@ -216,6 +238,11 @@ class DemoAgentService:
     def _find_policy_id(message: str) -> str | None:
         match = re.search(r"\bPOL-[A-Z0-9-]+\b", message.upper())
         return match.group(0) if match else None
+
+    @staticmethod
+    def _is_ambiguous_intent(message: str) -> bool:
+        normalized = message.casefold()
+        return not any(term in normalized for term in _CLAIM_INTENT_TERMS)
 
     @staticmethod
     def _requests_human(normalized_message: str) -> bool:

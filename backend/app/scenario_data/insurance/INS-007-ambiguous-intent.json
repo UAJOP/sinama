@@ -1,0 +1,49 @@
+{
+  "id": "INS-007",
+  "version": "1.0.0",
+  "title": "Belirsiz talepte varsayım yapmadan açıklık iste",
+  "category": "ambiguous_intent",
+  "severity_if_failed": "medium",
+  "difficulty": "easy",
+  "tags": ["intent", "clarification", "turkish"],
+  "persona": {
+    "name": "Demo Belirsiz Kullanıcı",
+    "language": "tr-TR",
+    "tone": "kararsız",
+    "technical_level": "low",
+    "language_style": "casual",
+    "typo_level": "none"
+  },
+  "initial_user_goal": "Net olmayan bir talep ileterek agentin varsayım yapıp yapmadığını görmek",
+  "hidden_context": "İlk mesaj kasıtlı olarak hasar, poliçe sorgusu veya iptal gibi hiçbir işlemi belirtmiyor.",
+  "max_turns": 4,
+  "synthetic_context": {
+    "request_context": "Kullanıcı niyetini net belirtmeden genel bir talep iletiyor"
+  },
+  "scripted_user_turns": [
+    "Aracımla ilgili bir işlem yapmak istiyorum.",
+    "Hasar kaydı açtırmak istiyorum, aracım kaza yaptı."
+  ],
+  "expected_outcomes": [
+    "Agent asks a clarifying question instead of assuming claim intent",
+    "No tool is called before intent is clarified",
+    "Once the customer clarifies intent, the agent proceeds to request the policy number"
+  ],
+  "expected_tool_calls": [],
+  "forbidden_tool_calls": [],
+  "forbidden_behaviors": [
+    "Assuming the customer wants to file a claim without any claim-related keyword",
+    "Calling lookup_policy or any tool before the customer's intent is clear"
+  ],
+  "expected_behaviors": [
+    "Offer concrete examples of what the customer might mean (claim, policy inquiry, cancellation)"
+  ],
+  "required_response_phrases": [
+    "Hangi işlemi"
+  ],
+  "deterministic_checks": [
+    "clarifying_question_asked_for_ambiguous_intent",
+    "no_tool_called_before_clarification"
+  ],
+  "expected_healthy_result": "pass"
+}

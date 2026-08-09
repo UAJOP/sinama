@@ -66,20 +66,25 @@ async def execute_pack(
     return store, completed.model_dump(mode="json")
 
 
-def test_insurance_pack_exists_with_five_stably_ordered_scenarios() -> None:
+def test_insurance_pack_exists_with_ten_stably_ordered_scenarios() -> None:
     packs = ScenarioPackRegistry().list_packs()
 
     assert len(packs) == 1
     pack = packs[0]
     assert pack.id == "insurance-v1"
     assert pack.name == "Insurance Reliability Pack v1"
-    assert pack.scenario_count == 5
+    assert pack.scenario_count == 10
     assert [scenario.scenario_id for scenario in pack.scenarios] == [
         "INS-001",
         "INS-002",
         "INS-003",
         "INS-004",
         "INS-005",
+        "INS-006",
+        "INS-007",
+        "INS-008",
+        "INS-009",
+        "INS-010",
     ]
 
 
@@ -110,13 +115,18 @@ def test_healthy_pack_executes_all_scenarios_with_actual_aggregate() -> None:
     results = store.get_results(run_id)
 
     assert payload["lifecycle_status"] == "completed"
-    assert payload["aggregate"] == {"total": 5, "passed": 5, "failed": 0, "errors": 0}
+    assert payload["aggregate"] == {"total": 10, "passed": 10, "failed": 0, "errors": 0}
     assert [result.scenario_id for result in results.results] == [
         "INS-001",
         "INS-002",
         "INS-003",
         "INS-004",
         "INS-005",
+        "INS-006",
+        "INS-007",
+        "INS-008",
+        "INS-009",
+        "INS-010",
     ]
     assert all(result.status is RunStatus.PASS for result in results.results)
 
@@ -128,13 +138,18 @@ def test_broken_pack_uses_observed_results_and_preserves_ins_001_evidence() -> N
     detail = store.get_result(run_id, "INS-001")
 
     assert payload["lifecycle_status"] == "completed"
-    assert payload["aggregate"] == {"total": 5, "passed": 3, "failed": 2, "errors": 0}
+    assert payload["aggregate"] == {"total": 10, "passed": 5, "failed": 5, "errors": 0}
     assert [(item.scenario_id, item.status.value) for item in summaries] == [
         ("INS-001", "fail"),
         ("INS-002", "pass"),
         ("INS-003", "pass"),
         ("INS-004", "pass"),
         ("INS-005", "fail"),
+        ("INS-006", "fail"),
+        ("INS-007", "pass"),
+        ("INS-008", "fail"),
+        ("INS-009", "fail"),
+        ("INS-010", "pass"),
     ]
     assert detail.status is RunStatus.FAIL
     assert detail.severity is not None and detail.severity.value == "high"
@@ -179,8 +194,8 @@ def test_external_target_uses_same_runner_without_persisting_credentials() -> No
 
     assert payload["agent_target"] == "external_http"
     assert payload["agent_label"] == "external_http"
-    assert payload["aggregate"] == {"total": 5, "passed": 5, "failed": 0, "errors": 0}
-    assert len(configurations) == 5
+    assert payload["aggregate"] == {"total": 10, "passed": 10, "failed": 0, "errors": 0}
+    assert len(configurations) == 10
     assert secret not in store.get_run(run_id).model_dump_json()
     assert secret not in store.get_results(run_id).model_dump_json()
 
@@ -262,13 +277,18 @@ def test_scenario_pack_api_returns_real_fixture_metadata(client: TestClient) -> 
     assert response.status_code == 200
     payload = response.json()
     assert payload[0]["id"] == "insurance-v1"
-    assert payload[0]["scenario_count"] == 5
+    assert payload[0]["scenario_count"] == 10
     assert [item["scenario_id"] for item in payload[0]["scenarios"]] == [
         "INS-001",
         "INS-002",
         "INS-003",
         "INS-004",
         "INS-005",
+        "INS-006",
+        "INS-007",
+        "INS-008",
+        "INS-009",
+        "INS-010",
     ]
 
 
@@ -307,7 +327,7 @@ def test_run_api_accepts_both_demo_modes(client: TestClient, mode: str) -> None:
     assert payload["agent_target"] == "built_in_demo"
     terminal = wait_for_api_run(client, payload["run_id"])
     assert terminal["lifecycle_status"] == "completed"
-    assert terminal["completed_scenarios"] == 5
+    assert terminal["completed_scenarios"] == 10
 
 
 def test_external_run_api_uses_ephemeral_configuration(
@@ -342,7 +362,7 @@ def test_external_run_api_uses_ephemeral_configuration(
     assert response.json()["agent_target"] == "external_http"
     assert secret not in response.text
     terminal = wait_for_api_run(client, response.json()["run_id"])
-    assert terminal["aggregate"] == {"total": 5, "passed": 5, "failed": 0, "errors": 0}
+    assert terminal["aggregate"] == {"total": 10, "passed": 10, "failed": 0, "errors": 0}
     assert secret not in json.dumps(terminal)
 
 
@@ -380,7 +400,7 @@ def test_run_result_apis_return_summary_and_full_detail(client: TestClient) -> N
     detail = client.get(f"/api/runs/{created['run_id']}/results/INS-001")
 
     assert results.status_code == 200
-    assert len(results.json()["results"]) == 5
+    assert len(results.json()["results"]) == 10
     assert results.json()["results"][0]["failed_check_count"] == 2
     assert detail.status_code == 200
     assert detail.json()["status"] == "fail"

@@ -14,7 +14,11 @@ import {
   type AgentTarget,
   type ConnectionTestStatus,
   type EvaluationCheck,
+  type Failure,
   type JsonScalar,
+  type MetricDimension,
+  type MetricScore,
+  type MetricStatus,
   type RunLifecycleStatus,
   type ScenarioCategory,
   type ScenarioPack,
@@ -28,8 +32,9 @@ import {
 
 import styles from "./runs.module.css";
 
-type DetailTab = "checks" | "transcript" | "trace" | "coverage";
+type DetailTab = "checks" | "metrics" | "failures" | "transcript" | "trace" | "coverage";
 type ConnectionState = "idle" | "testing" | ConnectionTestStatus;
+type FailureFilter = "all" | Severity;
 
 const TARGET_OPTIONS: { value: AgentTarget; label: string; note: string }[] = [
   {
@@ -72,6 +77,11 @@ const CATEGORY_LABELS: Record<ScenarioCategory, string> = {
   privacy: "Privacy",
   human_handoff: "Human handoff",
   prompt_injection: "Prompt injection",
+  context_retention: "Context retention",
+  ambiguous_intent: "Ambiguous intent",
+  turkish_noise: "Turkish noise",
+  repeated_request: "Repeated request",
+  failed_tool_recovery: "Failed tool recovery",
 };
 
 const SEVERITY_LABELS: Record<Severity, string> = {
@@ -83,10 +93,29 @@ const SEVERITY_LABELS: Record<Severity, string> = {
 
 const TAB_LABELS: Record<DetailTab, string> = {
   checks: "Checks",
+  metrics: "Metrics",
+  failures: "Failures",
   transcript: "Transcript",
   trace: "Tool Trace",
   coverage: "Coverage",
 };
+
+const METRIC_LABELS: Record<MetricDimension, string> = {
+  goal_completion: "Goal Completion",
+  tool_usage: "Tool Usage",
+  handoff: "Handoff",
+  safety: "Safety",
+  conversation_quality: "Conversation Quality",
+};
+
+const METRIC_STATUS_LABELS: Record<MetricStatus, string> = {
+  pass: "Pass",
+  warning: "Warning",
+  fail: "Fail",
+  not_applicable: "N/A",
+};
+
+const FAILURE_FILTERS: FailureFilter[] = ["all", "critical", "high", "medium", "low"];
 
 const TERMINAL_STATUSES: RunLifecycleStatus[] = ["completed", "error"];
 const POLL_DELAY_MS = 350;
@@ -625,7 +654,7 @@ function EmptyRunState() {
           scenario evidence workflow.
         </p>
         <ul className={styles.emptyFacts}>
-          <li>5 synthetic Turkish scenarios</li>
+          <li>10 synthetic Turkish scenarios</li>
           <li>Structured tool-contract evaluation</li>
           <li>No external API key required</li>
         </ul>
@@ -779,6 +808,7 @@ function ResultDetail({
           >
             {TAB_LABELS[tab]}
             {detail && tab === "checks" && <span>{detail.checks.length}</span>}
+            {detail && tab === "failures" && <span>{detail.failures.length}</span>}
           </button>
         ))}
       </div>
@@ -803,9 +833,78 @@ function ResultDetail({
 
 function DetailTabContent({ activeTab, detail }: { activeTab: DetailTab; detail: ScenarioRunResult }) {
   if (activeTab === "checks") return <ChecksView checks={detail.checks} error={detail.error} />;
+  if (activeTab === "metrics") return <MetricsView metrics={detail.metrics} />;
+  if (activeTab === "failures") return <FailuresView failures={detail.failures} />;
   if (activeTab === "transcript") return <TranscriptView detail={detail} />;
   if (activeTab === "trace") return <ToolTraceView detail={detail} />;
   return <CoverageView detail={detail} />;
+}
+
+function MetricsView({ metrics }: { metrics: MetricScore[] }) {
+  if (metrics.length === 0) return <p className={styles.emptyTab}>No metrics were computed.</p>;
+
+  return (
+    <div className={styles.metricGrid}>
+      {metrics.map((metric) => (
+        <article className={`${styles.metricCard} ${styles[metric.status]}`} key={metric.dimension}>
+          <div className={styles.metricHead}>
+            <h3>{METRIC_LABELS[metric.dimension]}</h3>
+            <span className={styles.metricStatusTag}>{METRIC_STATUS_LABELS[metric.status]}</span>
+          </div>
+          <strong className={styles.metricScore}>{metric.score === null ? "—" : metric.score}</strong>
+          <p>{metric.reason}</p>
+        </article>
+      ))}
+    </div>
+  );
+}
+
+function FailuresView({ failures }: { failures: Failure[] }) {
+  const [filter, setFilter] = useState<FailureFilter>("all");
+  const filtered = filter === "all" ? failures : failures.filter((failure) => failure.severity === filter);
+
+  if (failures.length === 0) return <p className={styles.emptyTab}>No failures were recorded.</p>;
+
+  return (
+    <div>
+      <div className={styles.failureFilters} role="tablist" aria-label="Filter failures by severity">
+        {FAILURE_FILTERS.map((option) => (
+          <button
+            type="button"
+            key={option}
+            className={filter === option ? styles.activeFilter : ""}
+            onClick={() => setFilter(option)}
+            aria-pressed={filter === option}
+          >
+            {option === "all" ? "All" : SEVERITY_LABELS[option]}
+          </button>
+        ))}
+      </div>
+      {filtered.length === 0 ? (
+        <p className={styles.emptyTab}>No failures at this severity.</p>
+      ) : (
+        <div className={styles.failureList}>
+          {filtered.map((failure, index) => (
+            <article className={`${styles.failureCard} ${styles[failure.severity]}`} key={index}>
+              <div className={styles.failureHeading}>
+                <strong>{failure.title}</strong>
+                <span>{SEVERITY_LABELS[failure.severity]}</span>
+              </div>
+              {failure.turn !== null && <p className={styles.failureTurn}>Turn {failure.turn}</p>}
+              <dl className={styles.failureGrid}>
+                <dt>Expected</dt>
+                <dd>{failure.expected}</dd>
+                <dt>Actual</dt>
+                <dd>{failure.actual}</dd>
+                <dt>Suggestion</dt>
+                <dd>{failure.suggestion}</dd>
+              </dl>
+            </article>
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function ChecksView({ checks, error }: { checks: EvaluationCheck[]; error: ScenarioRunResult["error"] }) {

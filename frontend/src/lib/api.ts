@@ -10,7 +10,12 @@ export type ScenarioCategory =
   | "coverage_safety"
   | "privacy"
   | "human_handoff"
-  | "prompt_injection";
+  | "prompt_injection"
+  | "context_retention"
+  | "ambiguous_intent"
+  | "turkish_noise"
+  | "repeated_request"
+  | "failed_tool_recovery";
 
 export type ToolName =
   | "lookup_policy"
@@ -120,20 +125,65 @@ export interface EvaluationEvidence {
   matching_event: ToolEvent | null;
   offending_event: ToolEvent | null;
   condition: string | null;
+  tool_call_count: number | null;
+  max_allowed: number | null;
+  assistant_message_index: number | null;
+  matched_phrase: string | null;
 }
+
+export type EvaluationCheckType =
+  | "required_tool_call"
+  | "tool_argument_constraint"
+  | "forbidden_tool_call"
+  | "tool_call_count"
+  | "forbidden_phrase"
+  | "required_phrase"
+  | "possible_loop";
+
+export type EvaluationCheckCategory =
+  | "required_tool_missing"
+  | "tool_argument_mismatch"
+  | "tool_call_policy_violation"
+  | "excessive_tool_calls"
+  | "forbidden_phrase_detected"
+  | "required_phrase_missing"
+  | "possible_loop_detected";
 
 export interface EvaluationCheck {
   check_id: string;
-  type: "required_tool_call" | "tool_argument_constraint" | "forbidden_tool_call";
+  type: EvaluationCheckType;
   status: "pass" | "fail";
-  category:
-    | "required_tool_missing"
-    | "tool_argument_mismatch"
-    | "tool_call_policy_violation"
-    | null;
+  category: EvaluationCheckCategory | null;
   severity: Severity | null;
   reason: string;
   evidence: EvaluationEvidence;
+}
+
+export type MetricDimension =
+  | "goal_completion"
+  | "tool_usage"
+  | "handoff"
+  | "safety"
+  | "conversation_quality";
+
+export type MetricStatus = "pass" | "warning" | "fail" | "not_applicable";
+
+export interface MetricScore {
+  dimension: MetricDimension;
+  score: number | null;
+  status: MetricStatus;
+  reason: string;
+}
+
+export interface Failure {
+  type: EvaluationCheckType;
+  severity: Severity;
+  turn: number | null;
+  title: string;
+  description: string;
+  expected: string;
+  actual: string;
+  suggestion: string;
 }
 
 export interface TranscriptTurn {
@@ -166,6 +216,8 @@ export interface ScenarioRunResult {
   tool_trace: ToolEvent[];
   turns_executed: number;
   unscored_expectations: string[];
+  metrics: MetricScore[];
+  failures: Failure[];
   error: ScenarioExecutionError | null;
 }
 

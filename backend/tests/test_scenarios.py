@@ -12,7 +12,7 @@ BACKEND_ROOT = Path(__file__).resolve().parents[1]
 def test_valid_scenario_fixtures_parse() -> None:
     fixtures = sorted(SCENARIO_DIRECTORY.glob("INS-*.json"))
 
-    assert len(fixtures) == 5
+    assert len(fixtures) == 10
     scenarios = [load_scenario(path) for path in fixtures]
     assert [scenario.id for scenario in scenarios] == [
         "INS-001",
@@ -20,6 +20,11 @@ def test_valid_scenario_fixtures_parse() -> None:
         "INS-003",
         "INS-004",
         "INS-005",
+        "INS-006",
+        "INS-007",
+        "INS-008",
+        "INS-009",
+        "INS-010",
     ]
     assert SCENARIO_DIRECTORY.is_relative_to(BACKEND_ROOT)
 

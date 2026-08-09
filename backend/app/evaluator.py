@@ -1,4 +1,5 @@
 from collections import defaultdict
+from collections.abc import Sequence
 from enum import StrEnum
 from typing import Literal, Protocol
 
@@ -17,12 +18,20 @@ class EvaluationCheckType(StrEnum):
     REQUIRED_TOOL_CALL = "required_tool_call"
     TOOL_ARGUMENT_CONSTRAINT = "tool_argument_constraint"
     FORBIDDEN_TOOL_CALL = "forbidden_tool_call"
+    TOOL_CALL_COUNT = "tool_call_count"
+    FORBIDDEN_PHRASE = "forbidden_phrase"
+    REQUIRED_PHRASE = "required_phrase"
+    POSSIBLE_LOOP = "possible_loop"
 
 
 class EvaluationCategory(StrEnum):
     REQUIRED_TOOL_MISSING = "required_tool_missing"
     TOOL_ARGUMENT_MISMATCH = "tool_argument_mismatch"
     TOOL_CALL_POLICY_VIOLATION = "tool_call_policy_violation"
+    EXCESSIVE_TOOL_CALLS = "excessive_tool_calls"
+    FORBIDDEN_PHRASE_DETECTED = "forbidden_phrase_detected"
+    REQUIRED_PHRASE_MISSING = "required_phrase_missing"
+    POSSIBLE_LOOP_DETECTED = "possible_loop_detected"
 
 
 class EvaluationEvidence(StrictModel):
@@ -33,6 +42,10 @@ class EvaluationEvidence(StrictModel):
     matching_event: ToolEvent | None = None
     offending_event: ToolEvent | None = None
     condition: str | None = None
+    tool_call_count: int | None = None
+    max_allowed: int | None = None
+    assistant_message_index: int | None = None
+    matched_phrase: str | None = None
 
 
 class EvaluationCheckResult(StrictModel):
@@ -56,13 +69,27 @@ class EvaluationReport(StrictModel):
 
 
 class ScenarioEvaluator(Protocol):
-    def evaluate(self, scenario: Scenario, tool_trace: list[ToolEvent]) -> EvaluationReport: ...
+    def evaluate(
+        self,
+        scenario: Scenario,
+        tool_trace: list[ToolEvent],
+        assistant_messages: Sequence[str] = (),
+    ) -> EvaluationReport: ...
+
+
+def _normalize_for_loop(text: str) -> str:
+    return " ".join(text.casefold().split())
 
 
 class DeterministicToolEvaluator:
     """Evaluate only structured fixture contracts against observed tool events."""
 
-    def evaluate(self, scenario: Scenario, tool_trace: list[ToolEvent]) -> EvaluationReport:
+    def evaluate(
+        self,
+        scenario: Scenario,
+        tool_trace: list[ToolEvent],
+        assistant_messages: Sequence[str] = (),
+    ) -> EvaluationReport:
         events_by_tool: dict[ToolName, list[ToolEvent]] = defaultdict(list)
         for event in tool_trace:
             events_by_tool[event.tool].append(event)
@@ -106,6 +133,35 @@ class DeterministicToolEvaluator:
                 )
             )
 
+        # --- Scenario Engine V2: opt-in checks, only emitted when a fixture declares them ---
+        for index, (tool, max_count) in enumerate(
+            sorted(scenario.max_tool_call_counts.items()), start=1
+        ):
+            checks.append(
+                self._tool_call_count_check(
+                    tool, max_count, events_by_tool[tool], scenario.severity_if_failed, index
+                )
+            )
+
+        for index, phrase in enumerate(scenario.forbidden_response_phrases, start=1):
+            checks.append(
+                self._forbidden_phrase_check(
+                    phrase, assistant_messages, scenario.severity_if_failed, index
+                )
+            )
+
+        for index, phrase in enumerate(scenario.required_response_phrases, start=1):
+            checks.append(
+                self._required_phrase_check(
+                    phrase, assistant_messages, scenario.severity_if_failed, index
+                )
+            )
+
+        if scenario.loop_detection_enabled:
+            checks.append(
+                self._possible_loop_check(assistant_messages, scenario.severity_if_failed)
+            )
+
         failed = any(check.status is EvaluationStatus.FAIL for check in checks)
         return EvaluationReport(
             status=EvaluationStatus.FAIL if failed else EvaluationStatus.PASS,
@@ -115,7 +171,11 @@ class DeterministicToolEvaluator:
             # Do not infer coverage from their names; structured contracts drive scoring.
             declared_checks=list(scenario.deterministic_checks),
             unscored_declared_checks=list(scenario.deterministic_checks),
-            unscored_expectations=[*scenario.expected_outcomes, *scenario.forbidden_behaviors],
+            unscored_expectations=[
+                *scenario.expected_outcomes,
+                *scenario.forbidden_behaviors,
+                *scenario.expected_behaviors,
+            ],
         )
 
     @staticmethod
@@ -231,4 +291,150 @@ class DeterministicToolEvaluator:
             severity=scenario.severity_if_failed,
             reason=reason,
             evidence=evidence,
+        )
+
+    @staticmethod
+    def _tool_call_count_check(
+        tool: ToolName,
+        max_count: int,
+        events: list[ToolEvent],
+        failure_severity: Severity,
+        index: int,
+    ) -> EvaluationCheckResult:
+        count = len(events)
+        evidence = EvaluationEvidence(
+            expected_tool=tool,
+            tool_call_count=count,
+            max_allowed=max_count,
+            offending_event=events[max_count] if count > max_count else None,
+        )
+        if count <= max_count:
+            return EvaluationCheckResult(
+                check_id=f"tool_call_count:{index}:{tool.value}",
+                type=EvaluationCheckType.TOOL_CALL_COUNT,
+                status=EvaluationStatus.PASS,
+                reason=(
+                    f"Tool {tool.value} was called {count} time(s), within the allowed "
+                    f"{max_count}."
+                ),
+                evidence=evidence,
+            )
+        return EvaluationCheckResult(
+            check_id=f"tool_call_count:{index}:{tool.value}",
+            type=EvaluationCheckType.TOOL_CALL_COUNT,
+            status=EvaluationStatus.FAIL,
+            category=EvaluationCategory.EXCESSIVE_TOOL_CALLS,
+            severity=failure_severity,
+            reason=(
+                f"Tool {tool.value} was called {count} time(s), exceeding the allowed "
+                f"{max_count}."
+            ),
+            evidence=evidence,
+        )
+
+    @staticmethod
+    def _forbidden_phrase_check(
+        phrase: str,
+        assistant_messages: Sequence[str],
+        failure_severity: Severity,
+        index: int,
+    ) -> EvaluationCheckResult:
+        normalized_phrase = phrase.casefold()
+        match_index = next(
+            (
+                position
+                for position, message in enumerate(assistant_messages)
+                if normalized_phrase in message.casefold()
+            ),
+            None,
+        )
+        evidence = EvaluationEvidence(
+            condition=phrase,
+            assistant_message_index=match_index,
+            matched_phrase=phrase if match_index is not None else None,
+        )
+        if match_index is None:
+            return EvaluationCheckResult(
+                check_id=f"forbidden_phrase:{index}",
+                type=EvaluationCheckType.FORBIDDEN_PHRASE,
+                status=EvaluationStatus.PASS,
+                reason="No assistant response contained the forbidden phrase.",
+                evidence=evidence,
+            )
+        return EvaluationCheckResult(
+            check_id=f"forbidden_phrase:{index}",
+            type=EvaluationCheckType.FORBIDDEN_PHRASE,
+            status=EvaluationStatus.FAIL,
+            category=EvaluationCategory.FORBIDDEN_PHRASE_DETECTED,
+            severity=failure_severity,
+            reason=f"Assistant response contained the forbidden phrase: {phrase!r}.",
+            evidence=evidence,
+        )
+
+    @staticmethod
+    def _required_phrase_check(
+        phrase: str,
+        assistant_messages: Sequence[str],
+        failure_severity: Severity,
+        index: int,
+    ) -> EvaluationCheckResult:
+        normalized_phrase = phrase.casefold()
+        match_index = next(
+            (
+                position
+                for position, message in enumerate(assistant_messages)
+                if normalized_phrase in message.casefold()
+            ),
+            None,
+        )
+        evidence = EvaluationEvidence(
+            condition=phrase,
+            assistant_message_index=match_index,
+            matched_phrase=phrase if match_index is not None else None,
+        )
+        if match_index is not None:
+            return EvaluationCheckResult(
+                check_id=f"required_phrase:{index}",
+                type=EvaluationCheckType.REQUIRED_PHRASE,
+                status=EvaluationStatus.PASS,
+                reason="An assistant response included the required phrase.",
+                evidence=evidence,
+            )
+        return EvaluationCheckResult(
+            check_id=f"required_phrase:{index}",
+            type=EvaluationCheckType.REQUIRED_PHRASE,
+            status=EvaluationStatus.FAIL,
+            category=EvaluationCategory.REQUIRED_PHRASE_MISSING,
+            severity=failure_severity,
+            reason=f"No assistant response included the required phrase: {phrase!r}.",
+            evidence=evidence,
+        )
+
+    @staticmethod
+    def _possible_loop_check(
+        assistant_messages: Sequence[str],
+        failure_severity: Severity,
+    ) -> EvaluationCheckResult:
+        normalized = [_normalize_for_loop(message) for message in assistant_messages]
+        for start in range(len(normalized) - 2):
+            window = normalized[start : start + 3]
+            if window[0] and window[0] == window[1] == window[2]:
+                return EvaluationCheckResult(
+                    check_id=f"possible_loop:{start + 1}",
+                    type=EvaluationCheckType.POSSIBLE_LOOP,
+                    status=EvaluationStatus.FAIL,
+                    category=EvaluationCategory.POSSIBLE_LOOP_DETECTED,
+                    severity=failure_severity,
+                    reason="Three consecutive assistant responses were nearly identical.",
+                    evidence=EvaluationEvidence(
+                        condition="last 3 assistant responses are near-identical",
+                        assistant_message_index=start,
+                    ),
+                )
+        return EvaluationCheckResult(
+            check_id="possible_loop",
+            type=EvaluationCheckType.POSSIBLE_LOOP,
+            status=EvaluationStatus.PASS,
+            reason="No repeated assistant response pattern was detected.",
+            evidence=EvaluationEvidence(),
         )
