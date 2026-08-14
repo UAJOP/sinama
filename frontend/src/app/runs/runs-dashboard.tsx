@@ -9,6 +9,7 @@ import {
   getScenarioRunResult,
   getTestRun,
   getTestRunResults,
+  listRecentRuns,
   listScenarioPacks,
   setRunBaseline,
   testExternalAgentConnection,
@@ -139,6 +140,7 @@ const RUN_VIEW_LABELS: Record<RunView, string> = {
 const TERMINAL_STATUSES: RunLifecycleStatus[] = ["completed", "error"];
 const POLL_DELAY_MS = 350;
 const MAX_POLL_FAILURES = 4;
+const RECENT_RUNS_LIMIT = 20;
 
 function isAbortError(cause: unknown): boolean {
   return cause instanceof DOMException && cause.name === "AbortError";
@@ -201,6 +203,10 @@ export function RunsDashboard() {
   const [isSettingBaseline, setIsSettingBaseline] = useState(false);
   const [baselineError, setBaselineError] = useState<string | null>(null);
 
+  const [recentRuns, setRecentRuns] = useState<TestRunSummary[]>([]);
+  const [recentRunsError, setRecentRunsError] = useState<string | null>(null);
+  const [recentRunsReload, setRecentRunsReload] = useState(0);
+
   const createSerial = useRef(0);
   const pollSerial = useRef(0);
   const resultsSerial = useRef(0);
@@ -227,6 +233,25 @@ export function RunsDashboard() {
 
     return () => controller.abort();
   }, [packsReload]);
+
+  // Persisted history: lets a reader reopen earlier runs after a page reload or
+  // a backend restart, instead of losing every run id with the tab.
+  useEffect(() => {
+    const controller = new AbortController();
+
+    void listRecentRuns(RECENT_RUNS_LIMIT, controller.signal)
+      .then((payload) => {
+        setRecentRuns(payload);
+        setRecentRunsError(null);
+      })
+      .catch((cause: unknown) => {
+        if (!isAbortError(cause)) {
+          setRecentRunsError(errorMessage(cause, "Recent runs could not be loaded."));
+        }
+      });
+
+    return () => controller.abort();
+  }, [recentRunsReload]);
 
   const selectedPack = useMemo(
     () => packs.find((pack) => pack.id === selectedPackId) ?? null,
@@ -339,12 +364,41 @@ export function RunsDashboard() {
       setIsLoadingComparison(true);
       setComparisonError(null);
       setComparisonReload((value) => value + 1);
+      // The baseline marker moved, so the history list is now stale.
+      setRecentRunsReload((value) => value + 1);
     } catch (cause) {
       setBaselineError(errorMessage(cause, "This run could not be set as the baseline."));
     } finally {
       setIsSettingBaseline(false);
     }
   }, [isSettingBaseline, run]);
+
+  const handleOpenRun = useCallback(
+    (summary: TestRunSummary) => {
+      if (runIsActive || summary.run_id === run?.run_id) return;
+      // Reopening reuses the existing terminal-run effects: setting `run` is
+      // enough to reload results, detail and the regression comparison.
+      ++createSerial.current;
+      ++pollSerial.current;
+      ++resultsSerial.current;
+      ++detailSerial.current;
+      ++comparisonSerial.current;
+      setRunError(null);
+      setDetailError(null);
+      setBaselineError(null);
+      setComparisonError(null);
+      setComparisonResponse(null);
+      setResults([]);
+      setSelectedScenarioId(null);
+      setDetail(null);
+      setActiveTab("checks");
+      setRunView("results");
+      setIsLoadingResults(TERMINAL_STATUSES.includes(summary.lifecycle_status));
+      setIsLoadingComparison(TERMINAL_STATUSES.includes(summary.lifecycle_status));
+      setRun(summary);
+    },
+    [run?.run_id, runIsActive],
+  );
 
   useEffect(() => {
     if (!run || TERMINAL_STATUSES.includes(run.lifecycle_status)) return;
@@ -363,6 +417,8 @@ export function RunsDashboard() {
           setIsLoadingResults(true);
           setIsLoadingComparison(true);
           setComparisonError(null);
+          // A finished run belongs in the persisted history list.
+          setRecentRunsReload((value) => value + 1);
         }
         setRun(current);
         if (!TERMINAL_STATUSES.includes(current.lifecycle_status)) {
@@ -471,7 +527,7 @@ export function RunsDashboard() {
           <h1>Test Runs</h1>
           <p>Run the insurance pack against a built-in or external agent and inspect the same deterministic evidence.</p>
         </div>
-        <span className={styles.storageNote}>IN-MEMORY · LAST 20 RUNS</span>
+        <span className={styles.storageNote}>LAST {RECENT_RUNS_LIMIT} RUNS</span>
       </header>
 
       <section className={styles.runControls} aria-labelledby="run-controls-title">
@@ -650,6 +706,18 @@ export function RunsDashboard() {
         )}
       </section>
 
+      <RecentRuns
+        runs={recentRuns}
+        activeRunId={run?.run_id ?? null}
+        error={recentRunsError}
+        disabled={runIsActive}
+        onOpen={handleOpenRun}
+        onRetry={() => {
+          setRecentRunsError(null);
+          setRecentRunsReload((value) => value + 1);
+        }}
+      />
+
       {runError && (
         <div className={styles.errorBanner} role="alert">
           <div><strong>Run unavailable</strong><span>{runError}</span></div>
@@ -742,6 +810,100 @@ export function RunsDashboard() {
         </>
       )}
     </main>
+  );
+}
+
+function runTimestamp(value: string): string {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime())
+    ? "—"
+    : parsed.toLocaleString(undefined, {
+        month: "short",
+        day: "2-digit",
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+}
+
+function RecentRuns({
+  runs,
+  activeRunId,
+  error,
+  disabled,
+  onOpen,
+  onRetry,
+}: {
+  runs: TestRunSummary[];
+  activeRunId: string | null;
+  error: string | null;
+  disabled: boolean;
+  onOpen: (run: TestRunSummary) => void;
+  onRetry: () => void;
+}) {
+  if (error) {
+    return (
+      <section className={styles.recentRuns} aria-labelledby="recent-runs-title">
+        <div className={styles.recentRunsHead}>
+          <h2 id="recent-runs-title">Recent runs</h2>
+        </div>
+        <div className={styles.inlineError} role="alert">
+          <span>{error}</span>
+          <button type="button" onClick={onRetry}>
+            Retry
+          </button>
+        </div>
+      </section>
+    );
+  }
+
+  if (runs.length === 0) return null;
+
+  return (
+    <section className={styles.recentRuns} aria-labelledby="recent-runs-title">
+      <div className={styles.recentRunsHead}>
+        <h2 id="recent-runs-title">Recent runs</h2>
+        <p>Reopen a stored run to inspect its evidence and regression comparison.</p>
+      </div>
+      <ul className={styles.recentRunsList}>
+        {runs.map((item) => {
+          const isActive = item.run_id === activeRunId;
+          return (
+            <li key={item.run_id}>
+              <button
+                type="button"
+                className={isActive ? styles.recentRunActive : undefined}
+                aria-current={isActive ? "true" : undefined}
+                disabled={disabled && !isActive}
+                onClick={() => onOpen(item)}
+              >
+                <span className={styles.recentRunTop}>
+                  <strong>{item.agent_label}</strong>
+                  {item.is_baseline && <em className={styles.baselineTag}>BASELINE</em>}
+                </span>
+                <span className={styles.recentRunMeta}>
+                  <span>{runTimestamp(item.created_at)}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>{item.lifecycle_status}</span>
+                </span>
+                <span className={styles.recentRunCounts}>
+                  {item.lifecycle_status === "completed" ? (
+                    <>
+                      <span className={styles.recentRunPass}>{item.aggregate.passed} pass</span>
+                      <span className={styles.recentRunFail}>{item.aggregate.failed} fail</span>
+                      <span className={styles.recentRunError}>{item.aggregate.errors} error</span>
+                    </>
+                  ) : (
+                    <span>
+                      {item.completed_scenarios}/{item.total_scenarios} scenarios
+                    </span>
+                  )}
+                </span>
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+    </section>
   );
 }
 

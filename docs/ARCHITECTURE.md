@@ -151,9 +151,32 @@ LLM judge output must be structured and include a short reason. Never treat one 
 
 ## Persistence
 
-Later target: PostgreSQL/Supabase.
+Scenarios stay repository-backed fixtures. Run history sits behind a single `RunStore` protocol with two implementations, selected by `SINAMA_RUN_STORE_BACKEND`:
 
-The current implementation uses repository-backed fixtures plus a bounded single-process in-memory run store. It is intended for local/demo inspection only: the latest 20 terminal runs survive navigation but not a backend restart. Durable persistence belongs to a later product step.
+- `memory` (default) — bounded single-process store keeping the latest 20 terminal runs. No database is required to develop, test or demo, and nothing survives a restart.
+- `postgres` — SQLAlchemy 2.x + psycopg 3 against PostgreSQL, compatible with Supabase through a standard connection string. Deliberately no Supabase SDK or REST coupling.
+
+Both backends render API models through the same projection helpers in `app/test_runs.py`, and both delegate regression scoring to `build_comparison()`. Neither backend owns evaluation logic.
+
+### Schema
+
+Three tables, created only by Alembic (`alembic upgrade head`); the application never issues DDL at startup.
+
+- `test_runs` — run identity, lifecycle timestamps, agent target/mode/label, orchestration error, and a **snapshot of the scenario pack as executed**. Regression compatibility is judged against that snapshot, not against a fixture a later deployment may have changed.
+- `scenario_results` — one row per scenario result, ordered by an explicit `position`. The typed `ScenarioRunResult` is stored as a JSON document (JSONB on PostgreSQL) rather than shredded into per-check columns, because nothing queries inside a result. `scenario_id` and `status` are duplicated into columns so run aggregates and single-scenario lookup avoid deserializing transcripts.
+- `run_baselines` — `pack_id` as the primary key, which is what enforces one baseline per pack. Reassignment replaces the row inside one transaction.
+
+Persisted payloads are re-validated through the Pydantic models on read; an incompatible payload raises a typed error rather than leaking internals.
+
+### Concurrency and restarts
+
+The store interface is synchronous. FastAPI already runs `def` endpoints in a threadpool, and `RunService` wraps every store call in `asyncio.to_thread`, so database I/O never blocks the scenario-execution event loop.
+
+SINAMA has no durable worker queue, so a `queued`/`running` run left behind by a dead process can never make progress. On startup the PostgreSQL store retires those rows to `error` with a generic service-interruption reason. Automatic resume is deliberately out of scope.
+
+### Secrets
+
+External-agent bearer tokens are never persisted — only the non-secret agent target and label reach storage. The database URL is a `SecretStr`, validation errors are configured not to echo input, and the engine is built with `hide_parameters=True` so statement parameters (which carry transcripts) never reach logs.
 
 ## Implemented API surface
 
@@ -161,9 +184,12 @@ The current implementation uses repository-backed fixtures plus a bounded single
 - `POST /api/agents/external/test-connection`
 - `GET /api/scenario-packs`
 - `POST /api/runs`
+- `GET /api/runs?limit=20`
 - `GET /api/runs/{run_id}`
 - `GET /api/runs/{run_id}/results`
 - `GET /api/runs/{run_id}/results/{scenario_id}`
+- `POST /api/runs/{run_id}/baseline`
+- `GET /api/runs/{run_id}/comparison`
 - `POST /api/scenarios/{scenario_id}/execute`
 
 The run summary/result-detail split keeps list payloads compact while making full evidence inspectable on demand.

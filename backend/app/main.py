@@ -1,6 +1,10 @@
+import asyncio
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from uuid import UUID
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import FastAPI, HTTPException, Query, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -41,13 +45,28 @@ from app.test_runs import (
     run_store,
 )
 
+logger = logging.getLogger(__name__)
 settings = get_settings()
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    # A persisted queued/running run cannot resume without a durable worker
+    # queue, so retire anything a previous process left mid-flight instead of
+    # leaving permanently "running" zombie records behind.
+    recovered = await asyncio.to_thread(run_store.recover_interrupted_runs)
+    if recovered:
+        logger.warning("Marked %s interrupted test run(s) as errored after restart.", recovered)
+    yield
+
+
 app = FastAPI(
     title="SINAMA API",
     description=(
         "Local API for the built-in Demo Insurance Agent and deterministic scenario runner."
     ),
     version="0.1.0",
+    lifespan=lifespan,
 )
 app.add_middleware(
     CORSMiddleware,
@@ -172,6 +191,23 @@ async def create_test_run(request: CreateTestRunRequest) -> TestRunSummary:
         raise HTTPException(status_code=404, detail="Scenario pack not found") from error
     except InvalidRunAgentConfigurationError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get(
+    "/api/runs",
+    response_model=list[TestRunSummary],
+    tags=["test-runs"],
+)
+def list_test_runs(
+    limit: int = Query(default=20, ge=1, le=100),
+) -> list[TestRunSummary]:
+    """Recent run history, newest first.
+
+    Bounded by design: this is the "reopen a recent run" surface, not an archive
+    browser. Older runs remain persisted and reachable by id.
+    """
+
+    return run_store.list_runs(limit)
 
 
 @app.get(
