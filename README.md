@@ -90,6 +90,14 @@ Failure Evidence
 - best-effort masking of TC kimlik no / phone / card-like digit runs in transcripts and tool arguments before they reach the API response
 - evidence-backed regression detection, not a pass/fail black box
 
+### Baseline & regression comparison
+
+- mark any completed run as its scenario pack's baseline
+- compare a later run of the same pack against that baseline on demand
+- get back a run-level score delta, a per-metric delta across all five dimensions, and an `IMPROVED` / `STABLE` / `REGRESSION` verdict
+- new, resolved and persistent failures are diffed explicitly between the baseline and the current run
+- a new critical-severity failure always forces a `REGRESSION` verdict, even if the aggregate score improved
+
 This is an MVP reliability lab, not a production enterprise test-management platform — see [Current limitations](#current-limitations).
 
 ## Architecture
@@ -176,6 +184,8 @@ Run API:
 - `GET /api/runs/{run_id}`
 - `GET /api/runs/{run_id}/results`
 - `GET /api/runs/{run_id}/results/{scenario_id}`
+- `POST /api/runs/{run_id}/baseline`
+- `GET /api/runs/{run_id}/comparison`
 
 ## Manual INS-001 reproduction
 
@@ -252,7 +262,7 @@ ruff check app tests
 mypy app
 ```
 
-The backend suite currently passes **113/113** (verified locally against this revision).
+The backend suite currently passes **139/139** (verified locally against this revision).
 
 Frontend, from `frontend/`:
 
@@ -267,8 +277,7 @@ pnpm build
 - run history is bounded (last 20 terminal runs) and in-memory
 - a backend restart clears all conversation and run history
 - no persistent database (PostgreSQL/Supabase is a later target)
-- no V1 vs V2 agent comparison
-- no baseline run / regression delta view
+- no V1 vs V2 agent comparison (baseline comparison is same-pack run-to-run, not a multi-agent-version comparison)
 - no semantic/LLM judge — evaluation remains fully deterministic (tool contracts, tool-call counts, response-phrase and loop-repetition checks)
 - no saved agent connections
 - no authentication
@@ -279,11 +288,10 @@ pnpm build
 
 ## Next
 
-1. baseline runs and regression delta reporting, built on the metric breakdown shipped in this revision
-2. PostgreSQL/Supabase persistent run history
-3. V1 vs V2 agent comparison
-4. test suites (grouping scenarios beyond a single pack)
-5. release-readiness report
+1. PostgreSQL/Supabase persistent run history
+2. explicit agent/version labels and V1 vs V2 comparison
+3. test suites (grouping scenarios beyond a single pack)
+4. release-readiness report
 
 ## Documentation
 
