@@ -98,6 +98,13 @@ Failure Evidence
 - new, resolved and persistent failures are diffed explicitly between the baseline and the current run
 - a new critical-severity failure always forces a `REGRESSION` verdict, even if the aggregate score improved
 
+### Run history
+
+- two storage backends behind one interface: a bounded in-memory store (the default — no database needed to develop, test or demo) and a PostgreSQL store for durable deployments
+- with PostgreSQL configured, completed runs, their full scenario evidence and the baseline assignment all survive a backend restart
+- reopen any recent run from the dashboard and inspect its evidence and regression comparison
+- full history is retained in PostgreSQL; the dashboard and `GET /api/runs` return the most recent runs
+
 This is an MVP reliability lab, not a production enterprise test-management platform — see [Current limitations](#current-limitations).
 
 ## Architecture
@@ -117,10 +124,22 @@ Deterministic Demo Agent      Async Scenario Runner
                                       |
                             Deterministic Tool Evaluator
                                       |
-                           Bounded In-Memory Run Store
+                                  Run Store
+                                      |
+                      +---------------+---------------+
+                      |                               |
+           Bounded In-Memory Store          PostgreSQL Store
+              (default, ephemeral)        (durable, Supabase-compatible)
 ```
 
-State is stored in memory. Conversations are isolated by conversation ID, while completed test runs are retained in a bounded store of the latest 20 terminal records. Restarting the backend clears conversations and test runs. Scenario fixtures and run results are typed Pydantic models; no run history is persisted to a database.
+Conversations are always in memory and isolated by conversation ID; a backend restart clears them.
+
+Run history is stored behind one interface with two backends, selected by `SINAMA_RUN_STORE_BACKEND`:
+
+- `memory` (default) keeps the latest 20 terminal runs in process. Nothing survives a restart, and no database is required to develop, test or demo.
+- `postgres` persists runs, full scenario results and the baseline assignment to PostgreSQL, so all three survive a restart. Any standard PostgreSQL connection string works, Supabase included — SINAMA does not depend on Supabase-specific APIs.
+
+Both backends render the same API models through the same projection helpers, and regression scoring is owned solely by the evaluator/regression modules, so the two cannot drift. Scenario fixtures and run results are typed Pydantic models, and persisted payloads are validated back through those models on read.
 
 ## External agent security
 
@@ -154,7 +173,20 @@ uvicorn app.main:app --reload --port 8000
 
 macOS/Linux activation uses `source .venv/bin/activate`. The API is available at `http://localhost:8000`; verify it with `GET http://localhost:8000/health`. Interactive API documentation is at `http://localhost:8000/docs`.
 
-Optional backend environment values can be copied from the repository `.env.example` into `backend/.env`.
+Optional backend environment values can be copied from the repository `.env.example` into `backend/.env`. No database is required: the default `memory` run store starts clean on every boot.
+
+### Optional: durable run history
+
+To keep run history across restarts, point SINAMA at a PostgreSQL database (Supabase or otherwise), create the schema, then start the backend:
+
+```powershell
+$env:SINAMA_RUN_STORE_BACKEND = "postgres"
+$env:SINAMA_DATABASE_URL = "postgresql://user:password@host:5432/database"
+alembic upgrade head
+uvicorn app.main:app --reload --port 8000
+```
+
+`alembic upgrade head` is the only supported way to create or change the schema; the application never issues DDL at startup. Selecting `postgres` without a valid `SINAMA_DATABASE_URL` fails immediately at startup rather than silently falling back to memory, and the URL is held as a secret so it is never logged or returned by the API.
 
 ### 2. Start the frontend
 
@@ -181,6 +213,7 @@ Run API:
 - `GET /api/scenario-packs`
 - `POST /api/agents/external/test-connection`
 - `POST /api/runs`
+- `GET /api/runs?limit=20`
 - `GET /api/runs/{run_id}`
 - `GET /api/runs/{run_id}/results`
 - `GET /api/runs/{run_id}/results/{scenario_id}`
@@ -274,13 +307,14 @@ pnpm build
 
 ## Current limitations
 
-- run history is bounded (last 20 terminal runs) and in-memory
-- a backend restart clears all conversation and run history
-- no persistent database (PostgreSQL/Supabase is a later target)
+- on the default `memory` backend, run history is bounded to the last 20 terminal runs and a restart clears it
+- playground conversations are always in memory and never persisted, on either backend
+- an interrupted `queued`/`running` run cannot resume after a restart — there is no durable worker queue, so those runs are retired to `error` on startup
 - no V1 vs V2 agent comparison (baseline comparison is same-pack run-to-run, not a multi-agent-version comparison)
 - no semantic/LLM judge — evaluation remains fully deterministic (tool contracts, tool-call counts, response-phrase and loop-repetition checks)
+- no run deletion or archive browsing UI; history beyond the recent window is reachable only by run id
 - no saved agent connections
-- no authentication
+- no authentication or multi-user separation — persisted history is shared by everyone with access to the deployment
 - no billing
 - no distributed workers
 - no voice-agent testing
@@ -288,10 +322,10 @@ pnpm build
 
 ## Next
 
-1. PostgreSQL/Supabase persistent run history
-2. explicit agent/version labels and V1 vs V2 comparison
-3. test suites (grouping scenarios beyond a single pack)
-4. release-readiness report
+1. explicit agent/version labels and V1 vs V2 comparison
+2. test suites (grouping scenarios beyond a single pack)
+3. release-readiness report
+4. semantic/LLM judge alongside the deterministic contract
 
 ## Documentation
 

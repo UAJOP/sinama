@@ -30,6 +30,7 @@
 .overview,
 .resultList,
 .resultDetail,
+.recentRuns,
 .emptyRun {
   border: 1px solid var(--line);
   border-radius: 16px;
@@ -182,6 +183,69 @@
 }
 .runButton:hover:not(:disabled) { background: #82f7c5; transform: translateY(-1px); }
 .runButton:disabled { border-color: #2a443b; color: #60766f; background: #172720; cursor: not-allowed; }
+.recentRuns { margin-top: 16px; padding: 16px 18px 18px; }
+.recentRunsHead { margin-bottom: 12px; }
+.recentRunsHead h2 { margin: 0; font-size: 14px; letter-spacing: -0.02em; }
+.recentRunsHead p { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
+
+.recentRunsList {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.recentRunsList button {
+  display: grid;
+  width: 100%;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: #08110f;
+  cursor: pointer;
+  text-align: left;
+}
+
+.recentRunsList button:hover:not(:disabled) { border-color: #2b5146; background: #0d1a17; }
+.recentRunsList button:disabled { cursor: not-allowed; opacity: 0.5; }
+.recentRunActive { border-color: #2b5146 !important; background: #112d25 !important; }
+
+.recentRunTop { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.recentRunTop strong { font-size: 12px; letter-spacing: -0.01em; }
+.baselineTag {
+  flex: none;
+  padding: 3px 6px;
+  border: 1px solid #2f5b4d;
+  border-radius: 999px;
+  color: var(--green);
+  background: #102b23;
+  font: 800 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-style: normal;
+  letter-spacing: 0.08em;
+}
+
+.recentRunMeta {
+  display: flex;
+  gap: 6px;
+  color: var(--muted);
+  font: 600 10px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.recentRunCounts {
+  display: flex;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.recentRunPass { color: var(--green); }
+.recentRunFail { color: var(--amber); }
+.recentRunError { color: var(--red); }
+
 .packDescription { margin: 13px 0 0; color: #687f78; font-size: 10px; line-height: 1.5; }
 .packDescription strong { color: #9cb2ab; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .inlineError, .errorBanner {
@@ -481,6 +545,8 @@
   .connectionButton { grid-column: auto; }
   .runButton { grid-column: auto; }
   .runControls { padding: 14px; }
+  .recentRuns { padding: 14px; }
+  .recentRunsList { grid-template-columns: 1fr; }
   .aggregateGrid { grid-template-columns: repeat(2, 1fr); }
   .aggregateCard:nth-child(2) { border-right: 0; }
   .aggregateCard:nth-child(-n + 2) { border-bottom: 1px solid var(--line); }

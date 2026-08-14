@@ -1,18 +1,19 @@
 import asyncio
 import logging
 from collections import OrderedDict
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
 from functools import partial
 from threading import RLock
-from typing import Literal, Protocol
+from typing import Literal, Protocol, TypeVar
 from uuid import UUID, uuid4
 
 from pydantic import Field
 
 from app.agent_adapters import AgentAdapter, DemoAgentAdapter
+from app.config import RunStoreBackend, Settings, get_settings
 from app.evaluator import EvaluationStatus
 from app.http_agent import ExternalAgentConfiguration, build_http_agent_adapter
 from app.models import AgentMode, AgentTarget, StrictModel
@@ -27,6 +28,8 @@ from app.scenario_runner import RunStatus, ScenarioRunResult, scenario_runner
 from app.scenarios import Scenario, ScenarioCategory, Severity
 
 logger = logging.getLogger(__name__)
+
+StoreResultT = TypeVar("StoreResultT")
 
 
 class TestRunLifecycleStatus(StrEnum):
@@ -120,7 +123,171 @@ class RunNotCompletedError(ValueError):
     pass
 
 
-class RunStore:
+class CorruptedRunRecordError(RuntimeError):
+    """A persisted record could not be validated back into its typed model."""
+
+
+INTERRUPTED_RUN_REASON = (
+    "Test run was interrupted by a service restart and cannot be resumed. Start a new run."
+)
+
+TERMINAL_LIFECYCLE_STATUSES = frozenset(
+    {TestRunLifecycleStatus.COMPLETED, TestRunLifecycleStatus.ERROR}
+)
+
+
+# --- Shared projections -------------------------------------------------------
+# Every run store renders the same API models from these helpers, so memory and
+# SQL backends cannot drift into two different notions of "the same run".
+
+
+def build_run_summary(
+    record: StoredTestRun,
+    *,
+    is_baseline: bool,
+    statuses: Sequence[RunStatus] | None = None,
+) -> TestRunSummary:
+    """Project a stored run onto the public summary model.
+
+    `statuses` lets a store that has deliberately not loaded full result payloads
+    supply the per-scenario outcomes it already knows (see `SqlRunStore.get_run`,
+    which aggregates them in SQL instead of deserializing every transcript).
+    """
+
+    observed = [result.status for result in record.results] if statuses is None else list(statuses)
+    return TestRunSummary(
+        run_id=record.run_id,
+        pack_id=record.pack.id,
+        pack_name=record.pack.name,
+        agent_target=record.agent_target,
+        agent_mode=record.agent_mode,
+        agent_label=record.agent_label,
+        lifecycle_status=record.lifecycle_status,
+        aggregate=RunAggregateCounts(
+            total=record.pack.scenario_count,
+            passed=sum(status is RunStatus.PASS for status in observed),
+            failed=sum(status is RunStatus.FAIL for status in observed),
+            errors=sum(status is RunStatus.ERROR for status in observed),
+        ),
+        completed_scenarios=len(observed),
+        total_scenarios=record.pack.scenario_count,
+        is_baseline=is_baseline,
+        created_at=record.created_at,
+        started_at=record.started_at,
+        completed_at=record.completed_at,
+        error=record.error.model_copy(deep=True) if record.error else None,
+    )
+
+
+def build_result_summary(
+    record: StoredTestRun,
+    result: ScenarioRunResult,
+) -> ScenarioResultSummary:
+    metadata = next(
+        scenario for scenario in record.pack.scenarios if scenario.scenario_id == result.scenario_id
+    )
+    return ScenarioResultSummary(
+        scenario_id=result.scenario_id,
+        title=metadata.title,
+        category=metadata.category,
+        status=result.status,
+        severity=result.severity,
+        turns_executed=result.turns_executed,
+        failed_check_count=sum(check.status is EvaluationStatus.FAIL for check in result.checks),
+        execution_error_category=(result.error.category.value if result.error else None),
+    )
+
+
+def build_results_response(
+    record: StoredTestRun,
+    *,
+    is_baseline: bool,
+) -> TestRunResultsResponse:
+    return TestRunResultsResponse(
+        run=build_run_summary(record, is_baseline=is_baseline),
+        results=[build_result_summary(record, result) for result in record.results],
+    )
+
+
+def build_comparison_response(
+    record: StoredTestRun,
+    baseline_run_id: UUID | None,
+    baseline_record: StoredTestRun | None,
+) -> RegressionComparisonResponse:
+    """Resolve comparison availability, then delegate scoring to `build_comparison`.
+
+    Regression semantics live in `app.regression` only - this decides *whether* a
+    comparison is possible, never what the numbers mean.
+    """
+
+    if baseline_run_id is None:
+        return RegressionComparisonResponse(status=ComparisonAvailability.NO_BASELINE)
+    # Checked before `baseline_record`: a run compared against itself needs no
+    # loaded baseline payloads, so stores are free to leave that argument None.
+    if baseline_run_id == record.run_id:
+        return RegressionComparisonResponse(status=ComparisonAvailability.IS_BASELINE)
+    if baseline_record is None:
+        return RegressionComparisonResponse(status=ComparisonAvailability.NO_BASELINE)
+
+    baseline_scenario_ids = {scenario.scenario_id for scenario in baseline_record.pack.scenarios}
+    current_scenario_ids = {scenario.scenario_id for scenario in record.pack.scenarios}
+    if baseline_scenario_ids != current_scenario_ids:
+        return RegressionComparisonResponse(status=ComparisonAvailability.INCOMPATIBLE)
+
+    return RegressionComparisonResponse(
+        status=ComparisonAvailability.AVAILABLE,
+        comparison=build_comparison(
+            baseline_run_id=baseline_run_id,
+            current_run_id=record.run_id,
+            pack_id=record.pack.id,
+            baseline_results=baseline_record.results,
+            current_results=record.results,
+        ),
+    )
+
+
+class RunStore(Protocol):
+    """Storage boundary shared by the in-memory and SQL run stores.
+
+    Every method is synchronous: FastAPI already runs `def` endpoints in a
+    threadpool, and `RunService` moves its calls off the event loop explicitly.
+    """
+
+    def create_run(
+        self,
+        pack: ScenarioPackSummary,
+        agent_mode: AgentMode,
+        *,
+        agent_target: AgentTarget = AgentTarget.BUILT_IN_DEMO,
+        agent_label: str | None = None,
+    ) -> TestRunSummary: ...
+
+    def mark_running(self, run_id: UUID) -> None: ...
+
+    def add_result(self, run_id: UUID, result: ScenarioRunResult) -> None: ...
+
+    def mark_completed(self, run_id: UUID) -> None: ...
+
+    def mark_error(self, run_id: UUID, reason: str) -> None: ...
+
+    def get_run(self, run_id: UUID) -> TestRunSummary: ...
+
+    def get_results(self, run_id: UUID) -> TestRunResultsResponse: ...
+
+    def get_result(self, run_id: UUID, scenario_id: str) -> ScenarioRunResult: ...
+
+    def list_runs(self, limit: int = 20) -> list[TestRunSummary]: ...
+
+    def set_baseline(self, run_id: UUID) -> TestRunSummary: ...
+
+    def get_comparison(self, run_id: UUID) -> RegressionComparisonResponse: ...
+
+    def recover_interrupted_runs(self) -> int: ...
+
+    def clear(self) -> None: ...
+
+
+class InMemoryRunStore:
     """Thread-safe, bounded in-memory storage for single-process demo runs."""
 
     def __init__(self, max_runs: int = 20) -> None:
@@ -184,10 +351,17 @@ class RunStore:
     def get_results(self, run_id: UUID) -> TestRunResultsResponse:
         with self._lock:
             record = self._get_locked(run_id)
-            return TestRunResultsResponse(
-                run=self._summary_locked(record),
-                results=[self._result_summary_locked(record, result) for result in record.results],
-            )
+            return build_results_response(record, is_baseline=self._is_baseline_locked(record))
+
+    def list_runs(self, limit: int = 20) -> list[TestRunSummary]:
+        with self._lock:
+            recent = list(self._runs.values())[-limit:] if limit > 0 else []
+            return [self._summary_locked(record) for record in reversed(recent)]
+
+    def recover_interrupted_runs(self) -> int:
+        """No-op: an in-memory store always starts empty, so nothing can be orphaned."""
+
+        return 0
 
     def get_result(self, run_id: UUID, scenario_id: str) -> ScenarioRunResult:
         with self._lock:
@@ -212,36 +386,13 @@ class RunStore:
         with self._lock:
             record = self._get_locked(run_id)
             baseline_id = self._baselines.get(record.pack.id)
-            if baseline_id is None:
-                return RegressionComparisonResponse(status=ComparisonAvailability.NO_BASELINE)
-            if baseline_id == run_id:
-                return RegressionComparisonResponse(status=ComparisonAvailability.IS_BASELINE)
-
-            baseline_record = self._runs.get(baseline_id)
-            if baseline_record is None:
+            baseline_record = self._runs.get(baseline_id) if baseline_id is not None else None
+            if baseline_id is not None and baseline_id != run_id and baseline_record is None:
                 # The baseline run aged out of the bounded store - self-heal the
                 # stale mapping instead of leaving a dangling reference around.
                 del self._baselines[record.pack.id]
-                return RegressionComparisonResponse(status=ComparisonAvailability.NO_BASELINE)
-
-            baseline_scenario_ids = {
-                scenario.scenario_id for scenario in baseline_record.pack.scenarios
-            }
-            current_scenario_ids = {scenario.scenario_id for scenario in record.pack.scenarios}
-            if baseline_scenario_ids != current_scenario_ids:
-                return RegressionComparisonResponse(status=ComparisonAvailability.INCOMPATIBLE)
-
-            comparison = build_comparison(
-                baseline_run_id=baseline_id,
-                current_run_id=run_id,
-                pack_id=record.pack.id,
-                baseline_results=baseline_record.results,
-                current_results=record.results,
-            )
-            return RegressionComparisonResponse(
-                status=ComparisonAvailability.AVAILABLE,
-                comparison=comparison,
-            )
+                baseline_id = None
+            return build_comparison_response(record, baseline_id, baseline_record)
 
     def clear(self) -> None:
         with self._lock:
@@ -258,69 +409,19 @@ class RunStore:
         except KeyError as error:
             raise TestRunNotFoundError(str(run_id)) from error
 
+    def _is_baseline_locked(self, record: StoredTestRun) -> bool:
+        return self._baselines.get(record.pack.id) == record.run_id
+
     def _summary_locked(self, record: StoredTestRun) -> TestRunSummary:
-        aggregate = self._aggregate(record)
-        return TestRunSummary(
-            run_id=record.run_id,
-            pack_id=record.pack.id,
-            pack_name=record.pack.name,
-            agent_target=record.agent_target,
-            agent_mode=record.agent_mode,
-            agent_label=record.agent_label,
-            lifecycle_status=record.lifecycle_status,
-            aggregate=aggregate,
-            completed_scenarios=len(record.results),
-            total_scenarios=record.pack.scenario_count,
-            is_baseline=self._baselines.get(record.pack.id) == record.run_id,
-            created_at=record.created_at,
-            started_at=record.started_at,
-            completed_at=record.completed_at,
-            error=record.error.model_copy(deep=True) if record.error else None,
-        )
-
-    @staticmethod
-    def _aggregate(record: StoredTestRun) -> RunAggregateCounts:
-        return RunAggregateCounts(
-            total=record.pack.scenario_count,
-            passed=sum(result.status is RunStatus.PASS for result in record.results),
-            failed=sum(result.status is RunStatus.FAIL for result in record.results),
-            errors=sum(result.status is RunStatus.ERROR for result in record.results),
-        )
-
-    @staticmethod
-    def _result_summary_locked(
-        record: StoredTestRun,
-        result: ScenarioRunResult,
-    ) -> ScenarioResultSummary:
-        metadata = next(
-            scenario
-            for scenario in record.pack.scenarios
-            if scenario.scenario_id == result.scenario_id
-        )
-        return ScenarioResultSummary(
-            scenario_id=result.scenario_id,
-            title=metadata.title,
-            category=metadata.category,
-            status=result.status,
-            severity=result.severity,
-            turns_executed=result.turns_executed,
-            failed_check_count=sum(
-                check.status is EvaluationStatus.FAIL for check in result.checks
-            ),
-            execution_error_category=(result.error.category.value if result.error else None),
-        )
+        return build_run_summary(record, is_baseline=self._is_baseline_locked(record))
 
     def _prune_locked(self) -> None:
-        terminal = {
-            TestRunLifecycleStatus.COMPLETED,
-            TestRunLifecycleStatus.ERROR,
-        }
         while len(self._runs) > self._max_runs:
             candidate = next(
                 (
                     run_id
                     for run_id, record in self._runs.items()
-                    if record.lifecycle_status in terminal
+                    if record.lifecycle_status in TERMINAL_LIFECYCLE_STATUSES
                 ),
                 None,
             )
@@ -361,6 +462,16 @@ class RunService:
         self._http_adapter_factory = http_adapter_factory
         self._tasks: dict[UUID, asyncio.Task[None]] = {}
 
+    @staticmethod
+    async def _store_call(operation: Callable[[], StoreResultT]) -> StoreResultT:
+        """Run a synchronous store operation without blocking the event loop.
+
+        The SQL store performs real network I/O; the in-memory store is trivial
+        but thread-safe, so both are safe to hand to a worker thread.
+        """
+
+        return await asyncio.to_thread(operation)
+
     async def create_run(
         self,
         pack_id: str,
@@ -393,11 +504,14 @@ class RunService:
             )
             agent_label = AgentTarget.EXTERNAL_HTTP.value
 
-        summary = self._store.create_run(
-            pack,
-            agent_mode,
-            agent_target=agent_target,
-            agent_label=agent_label,
+        summary = await self._store_call(
+            partial(
+                self._store.create_run,
+                pack,
+                agent_mode,
+                agent_target=agent_target,
+                agent_label=agent_label,
+            )
         )
         task = asyncio.create_task(
             self._execute_run(summary.run_id, scenarios, adapter_factory),
@@ -411,7 +525,7 @@ class RunService:
         task = self._tasks.get(run_id)
         if task is not None:
             await asyncio.shield(task)
-        return self._store.get_run(run_id)
+        return await self._store_call(partial(self._store.get_run, run_id))
 
     async def _execute_run(
         self,
@@ -420,20 +534,28 @@ class RunService:
         adapter_factory: ScenarioAdapterFactory,
     ) -> None:
         try:
-            self._store.mark_running(run_id)
+            await self._store_call(partial(self._store.mark_running, run_id))
             for scenario in scenarios:
                 result = await self._runner.run(
                     scenario,
                     adapter_factory(),
                 )
-                self._store.add_result(run_id, result)
-            self._store.mark_completed(run_id)
+                await self._store_call(partial(self._store.add_result, run_id, result))
+            await self._store_call(partial(self._store.mark_completed, run_id))
         except Exception:
             logger.exception("Unexpected orchestration error in test run %s", run_id)
-            self._store.mark_error(
-                run_id,
-                "Test run orchestration failed. Retry the run or inspect server logs.",
-            )
+            try:
+                await self._store_call(
+                    partial(
+                        self._store.mark_error,
+                        run_id,
+                        "Test run orchestration failed. Retry the run or inspect server logs.",
+                    )
+                )
+            except Exception:
+                # A store that is itself unavailable must not mask the original
+                # orchestration failure or leave an unhandled task exception.
+                logger.exception("Could not persist the error state for test run %s", run_id)
 
     def _forget_task(self, run_id: UUID, task: asyncio.Task[None]) -> None:
         current = self._tasks.get(run_id)
@@ -441,5 +563,23 @@ class RunService:
             self._tasks.pop(run_id, None)
 
 
-run_store = RunStore(max_runs=20)
+def build_run_store(settings: Settings | None = None) -> RunStore:
+    """Select the configured run store.
+
+    The SQL store is imported lazily so that a memory-backed deployment never
+    needs the database driver installed, and so this module stays importable
+    while `app.db.sql_run_store` imports its record types from here.
+    """
+
+    resolved = settings or get_settings()
+    if resolved.run_store_backend is RunStoreBackend.MEMORY:
+        return InMemoryRunStore(max_runs=resolved.run_history_limit)
+
+    from app.db.engine import create_run_store_engine
+    from app.db.sql_run_store import SqlRunStore
+
+    return SqlRunStore(create_run_store_engine(resolved))
+
+
+run_store: RunStore = build_run_store()
 run_service = RunService(store=run_store)
