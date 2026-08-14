@@ -379,6 +379,13 @@ export function testExternalAgentConnection(
   });
 }
 
+export function listRecentRuns(
+  limit = 20,
+  signal?: AbortSignal,
+): Promise<TestRunSummary[]> {
+  return request(`/api/runs?limit=${limit}`, { method: "GET", signal });
+}
+
 export function getTestRun(runId: string, signal?: AbortSignal): Promise<TestRunSummary> {
   return request(`/api/runs/${runId}`, { method: "GET", signal });
 }

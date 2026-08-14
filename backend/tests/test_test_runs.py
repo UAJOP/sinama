@@ -22,9 +22,9 @@ from app.scenario_packs import (
 from app.scenario_runner import RunStatus, ScenarioRunResult, scenario_runner
 from app.scenarios import Scenario
 from app.test_runs import (
+    InMemoryRunStore,
     RunNotCompletedError,
     RunService,
-    RunStore,
     ScenarioResultNotFoundError,
     run_store,
 )
@@ -60,8 +60,8 @@ async def execute_pack(
     *,
     runner: object = scenario_runner,
     max_runs: int = 20,
-) -> tuple[RunStore, dict[str, object]]:
-    store = RunStore(max_runs=max_runs)
+) -> tuple[InMemoryRunStore, dict[str, object]]:
+    store = InMemoryRunStore(max_runs=max_runs)
     service = RunService(store=store, runner=runner)  # type: ignore[arg-type]
     created = await service.create_run("insurance-v1", mode)
     completed = await service.wait_for_completion(created.run_id)
@@ -99,7 +99,7 @@ def test_unknown_pack_is_rejected_by_registry() -> None:
 
 def test_run_creation_generates_unique_ids() -> None:
     async def create_two() -> tuple[UUID, UUID]:
-        store = RunStore()
+        store = InMemoryRunStore()
         service = RunService(store=store)
         first = await service.create_run("insurance-v1", AgentMode.HEALTHY)
         second = await service.create_run("insurance-v1", AgentMode.HEALTHY)
@@ -176,8 +176,8 @@ def test_external_target_uses_same_runner_without_persisting_credentials() -> No
         configurations.append(configuration)
         return DemoAgentAdapter(AgentMode.HEALTHY, configuration_label="external_http")
 
-    async def execute() -> tuple[RunStore, dict[str, object]]:
-        store = RunStore()
+    async def execute() -> tuple[InMemoryRunStore, dict[str, object]]:
+        store = InMemoryRunStore()
         service = RunService(store=store, http_adapter_factory=external_factory)
         created = await service.create_run(
             "insurance-v1",
@@ -216,7 +216,7 @@ def test_completed_run_detail_is_returned_as_an_immutable_copy() -> None:
 
 
 def test_store_supports_lifecycle_states_and_bounded_retention() -> None:
-    store = RunStore(max_runs=2)
+    store = InMemoryRunStore(max_runs=2)
     pack = ScenarioPackRegistry().get_pack("insurance-v1")
     first = store.create_run(pack, AgentMode.HEALTHY)
     assert first.lifecycle_status is LifecycleStatus.QUEUED
@@ -262,7 +262,7 @@ def test_orchestration_exception_sets_safe_run_error() -> None:
 
 
 def test_unknown_run_and_result_are_rejected_by_store() -> None:
-    store = RunStore()
+    store = InMemoryRunStore()
 
     with pytest.raises(RunNotFoundError):
         store.get_run(uuid4())
@@ -431,8 +431,8 @@ def test_run_api_returns_404_for_unknown_run_and_result(client: TestClient) -> N
 
 async def two_completed_runs(
     baseline_mode: AgentMode, current_mode: AgentMode
-) -> tuple[RunStore, UUID, UUID]:
-    store = RunStore()
+) -> tuple[InMemoryRunStore, UUID, UUID]:
+    store = InMemoryRunStore()
     service = RunService(store=store)
     baseline = await service.create_run("insurance-v1", baseline_mode)
     await service.wait_for_completion(baseline.run_id)
@@ -452,14 +452,14 @@ def test_get_comparison_with_no_baseline_returns_no_baseline_status() -> None:
 
 
 def test_set_baseline_on_missing_run_raises_not_found() -> None:
-    store = RunStore()
+    store = InMemoryRunStore()
 
     with pytest.raises(RunNotFoundError):
         store.set_baseline(uuid4())
 
 
 def test_set_baseline_on_incomplete_run_raises_not_completed() -> None:
-    store = RunStore()
+    store = InMemoryRunStore()
     pack = ScenarioPackRegistry().get_pack("insurance-v1")
     run = store.create_run(pack, AgentMode.HEALTHY)
 
@@ -525,7 +525,7 @@ def test_comparison_detects_improvement_from_broken_baseline_to_healthy_current(
 
 
 def test_comparison_is_incompatible_when_scenario_set_differs() -> None:
-    store = RunStore()
+    store = InMemoryRunStore()
     pack = ScenarioPackRegistry().get_pack("insurance-v1")
     truncated_pack = pack.model_copy(update={"scenarios": pack.scenarios[:5]})
 
@@ -567,6 +567,50 @@ def test_baseline_and_comparison_api_flow(client: TestClient) -> None:
     assert payload["status"] == "available"
     assert payload["comparison"]["status"] == "regression"
     assert payload["comparison"]["new_failures"]
+
+
+def test_run_history_api_returns_recent_runs_newest_first(client: TestClient) -> None:
+    created = [
+        client.post("/api/runs", json={"pack_id": "insurance-v1", "agent_mode": "healthy"}).json()
+        for _ in range(3)
+    ]
+    for run in created:
+        wait_for_api_run(client, run["run_id"])
+
+    response = client.get("/api/runs")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert [item["run_id"] for item in payload] == [run["run_id"] for run in reversed(created)]
+    assert all(item["lifecycle_status"] == "completed" for item in payload)
+
+
+def test_run_history_api_honours_and_bounds_the_limit(client: TestClient) -> None:
+    for _ in range(3):
+        created = client.post(
+            "/api/runs",
+            json={"pack_id": "insurance-v1", "agent_mode": "healthy"},
+        ).json()
+        wait_for_api_run(client, created["run_id"])
+
+    assert len(client.get("/api/runs?limit=2").json()) == 2
+    assert client.get("/api/runs?limit=0").status_code == 422
+    assert client.get("/api/runs?limit=101").status_code == 422
+
+
+def test_run_history_api_marks_the_baseline_run(client: TestClient) -> None:
+    baseline = client.post(
+        "/api/runs",
+        json={"pack_id": "insurance-v1", "agent_mode": "healthy"},
+    ).json()
+    wait_for_api_run(client, baseline["run_id"])
+    client.post(f"/api/runs/{baseline['run_id']}/baseline")
+
+    payload = client.get("/api/runs").json()
+
+    assert [item["is_baseline"] for item in payload if item["run_id"] == baseline["run_id"]] == [
+        True
+    ]
 
 
 def test_baseline_api_returns_404_for_unknown_run(client: TestClient) -> None:
