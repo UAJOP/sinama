@@ -1,4 +1,10 @@
+# Production runtime dependencies for hosts that install from requirements.txt
+# (Railway). Must stay exactly in sync with [project].dependencies in
+# pyproject.toml - enforced by tests/test_packaging.py.
+alembic>=1.14,<2
 fastapi>=0.115,<1
 httpx>=0.28,<1
+psycopg[binary]>=3.2,<4
 pydantic-settings>=2.7,<3
+sqlalchemy>=2.0,<3
 uvicorn[standard]>=0.34,<1
