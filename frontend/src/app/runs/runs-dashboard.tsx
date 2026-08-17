@@ -4,6 +4,7 @@ import Image from "next/image";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
+  compareRuns,
   createTestRun,
   getRunComparison,
   getScenarioRunResult,
@@ -17,6 +18,7 @@ import {
   type AgentTarget,
   type ConnectionTestStatus,
   type EvaluationCheck,
+  type ExplicitRunComparisonResponse,
   type Failure,
   type JsonScalar,
   type MetricComparison,
@@ -141,6 +143,13 @@ const TERMINAL_STATUSES: RunLifecycleStatus[] = ["completed", "error"];
 const POLL_DELAY_MS = 350;
 const MAX_POLL_FAILURES = 4;
 const RECENT_RUNS_LIMIT = 20;
+/** Mirrors AGENT_VERSION_MAX_LENGTH in the backend. */
+const AGENT_VERSION_MAX_LENGTH = 64;
+
+/** Prefer the user's version label, falling back to SINAMA's derived label. */
+function runIdentity(run: TestRunSummary): string {
+  return run.agent_version ?? run.agent_label;
+}
 
 function isAbortError(cause: unknown): boolean {
   return cause instanceof DOMException && cause.name === "AbortError";
@@ -179,6 +188,7 @@ export function RunsDashboard() {
   const [agentTarget, setAgentTarget] = useState<AgentTarget>("built_in_demo");
   const [endpointUrl, setEndpointUrl] = useState("");
   const [bearerToken, setBearerToken] = useState("");
+  const [agentVersion, setAgentVersion] = useState("");
   const [connectionState, setConnectionState] = useState<ConnectionState>("idle");
   const [connectionMessage, setConnectionMessage] = useState<string | null>(null);
 
@@ -207,12 +217,21 @@ export function RunsDashboard() {
   const [recentRunsError, setRecentRunsError] = useState<string | null>(null);
   const [recentRunsReload, setRecentRunsReload] = useState(0);
 
+  // Explicit comparison. `null` reference means "use the pack baseline", which
+  // stays the default so existing regression behavior is unchanged.
+  const [referenceRunId, setReferenceRunId] = useState<string | null>(null);
+  const [explicitComparison, setExplicitComparison] =
+    useState<ExplicitRunComparisonResponse | null>(null);
+  const [isLoadingExplicit, setIsLoadingExplicit] = useState(false);
+  const [explicitError, setExplicitError] = useState<string | null>(null);
+
   const createSerial = useRef(0);
   const pollSerial = useRef(0);
   const resultsSerial = useRef(0);
   const detailSerial = useRef(0);
   const connectionSerial = useRef(0);
   const comparisonSerial = useRef(0);
+  const explicitSerial = useRef(0);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -271,6 +290,15 @@ export function RunsDashboard() {
     setConnectionMessage(null);
   }, []);
 
+  /** Return the Regression tab to the pack baseline, the default behavior. */
+  const resetExplicitComparison = useCallback(() => {
+    ++explicitSerial.current;
+    setReferenceRunId(null);
+    setExplicitComparison(null);
+    setExplicitError(null);
+    setIsLoadingExplicit(false);
+  }, []);
+
   const handleTestConnection = useCallback(async () => {
     const normalizedEndpoint = endpointUrl.trim();
     if (!normalizedEndpoint || connectionState === "testing" || runIsActive) return;
@@ -317,6 +345,7 @@ export function RunsDashboard() {
     setComparisonResponse(null);
     setComparisonError(null);
     ++comparisonSerial.current;
+    resetExplicitComparison();
 
     try {
       const created = await createTestRun(
@@ -329,6 +358,8 @@ export function RunsDashboard() {
               ...(bearerToken ? { bearer_token: bearerToken } : {}),
             }
           : undefined,
+        undefined,
+        agentVersion.trim() || undefined,
       );
       if (serial !== createSerial.current) return;
       setRun(created);
@@ -349,9 +380,11 @@ export function RunsDashboard() {
     endpointUrl,
     externalConnectionReady,
     isCreating,
+    resetExplicitComparison,
     runIsActive,
     selectedMode,
     selectedPackId,
+    agentVersion,
   ]);
 
   const handleSetBaseline = useCallback(async () => {
@@ -395,9 +428,11 @@ export function RunsDashboard() {
       setRunView("results");
       setIsLoadingResults(TERMINAL_STATUSES.includes(summary.lifecycle_status));
       setIsLoadingComparison(TERMINAL_STATUSES.includes(summary.lifecycle_status));
+      // A reference chosen for the previous run is meaningless for this one.
+      resetExplicitComparison();
       setRun(summary);
     },
-    [run?.run_id, runIsActive],
+    [resetExplicitComparison, run?.run_id, runIsActive],
   );
 
   useEffect(() => {
@@ -494,6 +529,31 @@ export function RunsDashboard() {
   }, [terminalRunId, comparisonReload]);
 
   useEffect(() => {
+    if (!terminalRunId || !referenceRunId) return;
+
+    // Loading/error state is primed by whoever sets `referenceRunId`, matching
+    // the other fetch effects here and keeping this body free of setState.
+    const serial = ++explicitSerial.current;
+    const controller = new AbortController();
+
+    void compareRuns(terminalRunId, referenceRunId, controller.signal)
+      .then((payload) => {
+        if (serial === explicitSerial.current) setExplicitComparison(payload);
+      })
+      .catch((cause: unknown) => {
+        if (!isAbortError(cause) && serial === explicitSerial.current) {
+          setExplicitComparison(null);
+          setExplicitError(errorMessage(cause, "These runs could not be compared."));
+        }
+      })
+      .finally(() => {
+        if (serial === explicitSerial.current) setIsLoadingExplicit(false);
+      });
+
+    return () => controller.abort();
+  }, [terminalRunId, referenceRunId]);
+
+  useEffect(() => {
     if (!activeRunId || !selectedScenarioId) return;
 
     const serial = ++detailSerial.current;
@@ -518,6 +578,21 @@ export function RunsDashboard() {
   const progressPercent = run
     ? Math.round((run.completed_scenarios / run.total_scenarios) * 100)
     : 0;
+
+  // Only offer runs the backend will actually accept: completed, same pack, and
+  // never the run being viewed. Anything else is rejected server-side anyway.
+  const comparisonCandidates = useMemo(
+    () =>
+      run
+        ? recentRuns.filter(
+            (candidate) =>
+              candidate.run_id !== run.run_id &&
+              candidate.lifecycle_status === "completed" &&
+              candidate.pack_id === run.pack_id,
+          )
+        : [],
+    [recentRuns, run],
+  );
 
   return (
     <main className={styles.shell}>
@@ -592,6 +667,18 @@ export function RunsDashboard() {
                 ))}
               </div>
             </fieldset>
+
+            <label>
+              <span>Agent version (optional)</span>
+              <input
+                type="text"
+                value={agentVersion}
+                onChange={(event) => setAgentVersion(event.target.value)}
+                placeholder="v1.4 · prod-2026-08-17"
+                maxLength={AGENT_VERSION_MAX_LENGTH}
+                disabled={isCreating || runIsActive}
+              />
+            </label>
 
             <button
               className={styles.runButton}
@@ -775,11 +862,33 @@ export function RunsDashboard() {
           )}
 
           {runView === "regression" ? (
-            <RegressionView
-              response={comparisonResponse}
-              isLoading={isLoadingComparison}
-              error={comparisonError}
-            />
+            <>
+              <CompareAgainstControl
+                candidates={comparisonCandidates}
+                referenceRunId={referenceRunId}
+                onChange={(nextReferenceId) => {
+                  ++explicitSerial.current;
+                  setExplicitComparison(null);
+                  setExplicitError(null);
+                  setIsLoadingExplicit(nextReferenceId !== null);
+                  setReferenceRunId(nextReferenceId);
+                }}
+                disabled={runIsActive}
+              />
+              {referenceRunId ? (
+                <ExplicitComparisonView
+                  response={explicitComparison}
+                  isLoading={isLoadingExplicit}
+                  error={explicitError}
+                />
+              ) : (
+                <RegressionView
+                  response={comparisonResponse}
+                  isLoading={isLoadingComparison}
+                  error={comparisonError}
+                />
+              )}
+            </>
           ) : isLoadingResults ? (
             <LoadingBlock label="Loading scenario summaries…" />
           ) : results.length > 0 ? (
@@ -810,6 +919,110 @@ export function RunsDashboard() {
         </>
       )}
     </main>
+  );
+}
+
+function CompareAgainstControl({
+  candidates,
+  referenceRunId,
+  onChange,
+  disabled,
+}: {
+  candidates: TestRunSummary[];
+  referenceRunId: string | null;
+  onChange: (referenceRunId: string | null) => void;
+  disabled: boolean;
+}) {
+  return (
+    <section className={styles.compareControl} aria-label="Comparison reference">
+      <label>
+        <span>Compare against</span>
+        <select
+          value={referenceRunId ?? ""}
+          onChange={(event) => onChange(event.target.value || null)}
+          disabled={disabled || candidates.length === 0}
+        >
+          <option value="">Pack baseline (default)</option>
+          {candidates.map((candidate) => (
+            <option value={candidate.run_id} key={candidate.run_id}>
+              {runIdentity(candidate)} · {runTimestamp(candidate.created_at)}
+              {candidate.is_baseline ? " · baseline" : ""}
+            </option>
+          ))}
+        </select>
+      </label>
+      {referenceRunId ? (
+        <button type="button" onClick={() => onChange(null)}>
+          Back to baseline
+        </button>
+      ) : (
+        <p className={styles.compareHint}>
+          {candidates.length === 0
+            ? "No other completed runs of this pack yet."
+            : "Pick another completed run to compare this one against."}
+        </p>
+      )}
+    </section>
+  );
+}
+
+function ExplicitComparisonView({
+  response,
+  isLoading,
+  error,
+}: {
+  response: ExplicitRunComparisonResponse | null;
+  isLoading: boolean;
+  error: string | null;
+}) {
+  if (isLoading) {
+    return (
+      <section className={styles.regressionSection}>
+        <LoadingBlock label="Comparing runs…" />
+      </section>
+    );
+  }
+  if (error) {
+    return (
+      <section className={styles.regressionSection}>
+        <div className={styles.detailError} role="alert">{error}</div>
+      </section>
+    );
+  }
+  if (!response) return null;
+
+  const comparison = response.comparison;
+
+  return (
+    <section className={styles.regressionSection} aria-label="Explicit run comparison">
+      <p className={styles.compareAxis}>
+        <span>{runIdentity(response.reference_run)}</span>
+        <span aria-hidden="true">→</span>
+        <span>{runIdentity(response.current_run)}</span>
+      </p>
+      <RegressionSummary comparison={comparison} />
+      <MetricDeltaTable changes={comparison.metric_changes} />
+      <div className={styles.failureDiffGrid}>
+        <FailureDiffColumn
+          title="New Failures"
+          tone="fail"
+          entries={comparison.new_failures}
+          emptyLabel="No new failures."
+        />
+        <FailureDiffColumn
+          title="Resolved"
+          tone="pass"
+          entries={comparison.resolved_failures}
+          emptyLabel="Nothing resolved."
+        />
+        <FailureDiffColumn
+          title="Persistent"
+          tone="warning"
+          entries={comparison.persistent_failures}
+          emptyLabel="No persistent failures."
+        />
+      </div>
+    </section>
   );
 }
 
@@ -880,6 +1093,9 @@ function RecentRuns({
                   <strong>{item.agent_label}</strong>
                   {item.is_baseline && <em className={styles.baselineTag}>BASELINE</em>}
                 </span>
+                {item.agent_version && (
+                  <span className={styles.versionTag}>{item.agent_version}</span>
+                )}
                 <span className={styles.recentRunMeta}>
                   <span>{runTimestamp(item.created_at)}</span>
                   <span aria-hidden="true">·</span>
@@ -1011,6 +1227,9 @@ function RunOverview({
           <span>MODE <strong>{run.agent_mode === "healthy" ? "Healthy" : "Broken"}</strong></span>
         )}
         <span>PACK <strong>{run.pack_id}</strong></span>
+        {run.agent_version && (
+          <span>VERSION <strong>{run.agent_version}</strong></span>
+        )}
         <span>OUTCOMES <strong>Observed results only</strong></span>
         <span className={styles.baselineAction}>
           {run.is_baseline ? (

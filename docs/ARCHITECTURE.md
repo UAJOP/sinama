@@ -190,6 +190,7 @@ External-agent bearer tokens are never persisted — only the non-secret agent t
 - `GET /api/runs/{run_id}/results/{scenario_id}`
 - `POST /api/runs/{run_id}/baseline`
 - `GET /api/runs/{run_id}/comparison`
+- `GET /api/runs/{current_run_id}/compare/{reference_run_id}`
 - `POST /api/scenarios/{scenario_id}/execute`
 
 The run summary/result-detail split keeps list payloads compact while making full evidence inspectable on demand.

@@ -91,6 +91,8 @@ export interface TestRunSummary {
   agent_target: AgentTarget;
   agent_mode: AgentMode;
   agent_label: string;
+  /** Optional user-supplied version metadata. Distinct from agent_label. */
+  agent_version: string | null;
   lifecycle_status: RunLifecycleStatus;
   aggregate: RunAggregate;
   completed_scenarios: number;
@@ -216,6 +218,12 @@ export interface RegressionComparison {
   new_failures: ScenarioFailure[];
   resolved_failures: ScenarioFailure[];
   persistent_failures: ScenarioFailure[];
+}
+
+export interface ExplicitRunComparisonResponse {
+  reference_run: TestRunSummary;
+  current_run: TestRunSummary;
+  comparison: RegressionComparison;
 }
 
 export interface RegressionComparisonResponse {
@@ -355,6 +363,7 @@ export function createTestRun(
   agentTarget: AgentTarget,
   externalAgent?: ExternalAgentConfiguration,
   signal?: AbortSignal,
+  agentVersion?: string,
 ): Promise<TestRunSummary> {
   return request("/api/runs", {
     method: "POST",
@@ -363,6 +372,9 @@ export function createTestRun(
       agent_mode: agentMode,
       agent_target: agentTarget,
       external_agent: externalAgent,
+      // Omitted entirely when unset, so the request stays byte-identical to
+      // what pre-versioning clients send.
+      ...(agentVersion ? { agent_version: agentVersion } : {}),
     }),
     signal,
   });
@@ -384,6 +396,18 @@ export function listRecentRuns(
   signal?: AbortSignal,
 ): Promise<TestRunSummary[]> {
   return request(`/api/runs?limit=${limit}`, { method: "GET", signal });
+}
+
+/** Explicit reference -> current comparison. Never touches baseline state. */
+export function compareRuns(
+  currentRunId: string,
+  referenceRunId: string,
+  signal?: AbortSignal,
+): Promise<ExplicitRunComparisonResponse> {
+  return request(`/api/runs/${currentRunId}/compare/${referenceRunId}`, {
+    method: "GET",
+    signal,
+  });
 }
 
 export function getTestRun(runId: string, signal?: AbortSignal): Promise<TestRunSummary> {

@@ -35,6 +35,8 @@ from app.scenario_runner import ScenarioRunResult, scenario_runner
 from app.scenarios import ScenarioNotFoundError, load_scenario_by_id
 from app.test_runs import (
     CreateTestRunRequest,
+    ExplicitRunComparisonResponse,
+    IncompatibleRunComparisonError,
     InvalidRunAgentConfigurationError,
     RunNotCompletedError,
     ScenarioResultNotFoundError,
@@ -186,6 +188,7 @@ async def create_test_run(request: CreateTestRunRequest) -> TestRunSummary:
             request.agent_mode,
             agent_target=request.agent_target,
             external_agent=request.external_agent,
+            agent_version=request.agent_version,
         )
     except ScenarioPackNotFoundError as error:
         raise HTTPException(status_code=404, detail="Scenario pack not found") from error
@@ -272,3 +275,28 @@ def get_test_run_comparison(run_id: UUID) -> RegressionComparisonResponse:
         return run_store.get_comparison(run_id)
     except TestRunNotFoundError as error:
         raise HTTPException(status_code=404, detail="Test run not found") from error
+
+
+@app.get(
+    "/api/runs/{current_run_id}/compare/{reference_run_id}",
+    response_model=ExplicitRunComparisonResponse,
+    tags=["test-runs"],
+)
+def compare_test_runs(
+    current_run_id: UUID,
+    reference_run_id: UUID,
+) -> ExplicitRunComparisonResponse:
+    """Compare two explicitly chosen completed runs: reference -> current.
+
+    Computed on demand and never persisted. Independent of the pack baseline:
+    this neither reads baseline state for scoring nor reassigns it.
+    """
+
+    try:
+        return run_store.compare_runs(reference_run_id, current_run_id)
+    except TestRunNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Test run not found") from error
+    except RunNotCompletedError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except IncompatibleRunComparisonError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error

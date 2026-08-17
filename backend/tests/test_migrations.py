@@ -103,6 +103,57 @@ def test_migration_is_reversible(empty_database: Engine) -> None:
     assert remaining == set()
 
 
+def test_agent_version_is_added_by_0002_not_0001(empty_database: Engine) -> None:
+    with empty_database.begin() as connection:
+        command.upgrade(_alembic_config(connection), "0001")
+    at_0001 = {column["name"] for column in inspect(empty_database).get_columns("test_runs")}
+
+    with empty_database.begin() as connection:
+        command.upgrade(_alembic_config(connection), "0002")
+    at_0002 = {column["name"] for column in inspect(empty_database).get_columns("test_runs")}
+
+    assert "agent_version" not in at_0001
+    assert at_0002 - at_0001 == {"agent_version"}
+
+
+def test_0002_keeps_rows_written_before_it_valid(empty_database: Engine) -> None:
+    """A production row that predates agent versioning must survive the upgrade."""
+
+    with empty_database.begin() as connection:
+        command.upgrade(_alembic_config(connection), "0001")
+        connection.exec_driver_sql(
+            "INSERT INTO test_runs (run_id, pack_id, pack_name, pack_snapshot, agent_target,"
+            " agent_mode, agent_label, lifecycle_status, created_at)"
+            " VALUES ('legacy-run', 'insurance-v1', 'Pack', '{}', 'built_in_demo',"
+            " 'healthy', 'healthy', 'completed', '2026-08-01 00:00:00')"
+        )
+
+    with empty_database.begin() as connection:
+        command.upgrade(_alembic_config(connection), "0002")
+
+    with empty_database.connect() as connection:
+        row = connection.exec_driver_sql(
+            "SELECT agent_label, agent_version FROM test_runs WHERE run_id = 'legacy-run'"
+        ).one()
+
+    # Pre-existing data is preserved and simply reports no version.
+    assert row.agent_label == "healthy"
+    assert row.agent_version is None
+
+
+def test_0002_downgrade_removes_only_agent_version(empty_database: Engine) -> None:
+    with empty_database.begin() as connection:
+        config = _alembic_config(connection)
+        command.upgrade(config, "head")
+    at_head = {column["name"] for column in inspect(empty_database).get_columns("test_runs")}
+
+    with empty_database.begin() as connection:
+        command.downgrade(_alembic_config(connection), "0001")
+    after = {column["name"] for column in inspect(empty_database).get_columns("test_runs")}
+
+    assert at_head - after == {"agent_version"}
+
+
 def test_upgrade_downgrade_upgrade_round_trips(empty_database: Engine) -> None:
     with empty_database.begin() as connection:
         config = _alembic_config(connection)

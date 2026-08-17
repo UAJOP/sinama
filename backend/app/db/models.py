@@ -8,8 +8,11 @@ Design notes:
 - The few columns that are duplicated out of those payloads (`scenario_id`,
   `status`) exist to answer real queries without deserializing transcripts: run
   aggregates and single-scenario lookup.
-- Column types are declared once here and reused by the Alembic migration so the
-  two cannot drift.
+- This module describes the *current* schema only. Alembic revisions are frozen
+  historical snapshots that declare their own column types inline and import
+  nothing from here, so editing a model can never retroactively change what an
+  old revision builds. Parity between the two is asserted by
+  `tests/test_migrations.py`; divergence is resolved by adding a new revision.
 """
 
 from datetime import datetime
@@ -41,6 +44,7 @@ PACK_ID_LENGTH = 128
 SCENARIO_ID_LENGTH = 64
 LABEL_LENGTH = 128
 STATUS_LENGTH = 32
+AGENT_VERSION_LENGTH = 64
 
 
 class Base(DeclarativeBase):
@@ -60,6 +64,10 @@ class TestRunRow(Base):
     agent_target: Mapped[str] = mapped_column(String(STATUS_LENGTH), nullable=False)
     agent_mode: Mapped[str] = mapped_column(String(LABEL_LENGTH), nullable=False)
     agent_label: Mapped[str] = mapped_column(String(LABEL_LENGTH), nullable=False)
+    # Optional user metadata, distinct from the SINAMA-derived agent_label.
+    agent_version: Mapped[str | None] = mapped_column(
+        String(AGENT_VERSION_LENGTH), nullable=True
+    )
     lifecycle_status: Mapped[str] = mapped_column(String(STATUS_LENGTH), nullable=False)
     created_at: Mapped[datetime] = mapped_column(Timestamp, nullable=False)
     started_at: Mapped[datetime | None] = mapped_column(Timestamp, nullable=True)
