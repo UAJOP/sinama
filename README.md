@@ -97,6 +97,8 @@ Failure Evidence
 - get back a run-level score delta, a per-metric delta across all five dimensions, and an `IMPROVED` / `STABLE` / `REGRESSION` verdict
 - new, resolved and persistent failures are diffed explicitly between the baseline and the current run
 - a new critical-severity failure always forces a `REGRESSION` verdict, even if the aggregate score improved
+- tag a run with an optional `agent_version` (`v1.4`, `prod-2026-08-17`, `claude-sonnet-4.5`) — free-form metadata kept separate from the SINAMA-derived agent label
+- compare any two completed runs of the same pack directly, reference → current, without disturbing the baseline; comparisons are computed on demand and never stored
 
 ### Run history
 
@@ -219,6 +221,7 @@ Run API:
 - `GET /api/runs/{run_id}/results/{scenario_id}`
 - `POST /api/runs/{run_id}/baseline`
 - `GET /api/runs/{run_id}/comparison`
+- `GET /api/runs/{current_run_id}/compare/{reference_run_id}`
 
 ## Manual INS-001 reproduction
 
@@ -310,7 +313,7 @@ pnpm build
 - on the default `memory` backend, run history is bounded to the last 20 terminal runs and a restart clears it
 - playground conversations are always in memory and never persisted, on either backend
 - an interrupted `queued`/`running` run cannot resume after a restart — there is no durable worker queue, so those runs are retired to `error` on startup
-- no V1 vs V2 agent comparison (baseline comparison is same-pack run-to-run, not a multi-agent-version comparison)
+- `agent_version` is descriptive metadata only — comparisons are run-to-run within a pack, and SINAMA does not group, roll up or trend results by version
 - no semantic/LLM judge — evaluation remains fully deterministic (tool contracts, tool-call counts, response-phrase and loop-repetition checks)
 - no run deletion or archive browsing UI; history beyond the recent window is reachable only by run id
 - no saved agent connections
@@ -322,7 +325,7 @@ pnpm build
 
 ## Next
 
-1. explicit agent/version labels and V1 vs V2 comparison
+1. version-aware trends (grouping and rolling up results by `agent_version`)
 2. test suites (grouping scenarios beyond a single pack)
 3. release-readiness report
 4. semantic/LLM judge alongside the deterministic contract

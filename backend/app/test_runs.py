@@ -7,17 +7,22 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from functools import partial
 from threading import RLock
-from typing import Literal, Protocol, TypeVar
+from typing import Annotated, Literal, Protocol, TypeVar
 from uuid import UUID, uuid4
 
-from pydantic import Field
+from pydantic import BeforeValidator, Field, StringConstraints
 
 from app.agent_adapters import AgentAdapter, DemoAgentAdapter
 from app.config import RunStoreBackend, Settings, get_settings
 from app.evaluator import EvaluationStatus
 from app.http_agent import ExternalAgentConfiguration, build_http_agent_adapter
 from app.models import AgentMode, AgentTarget, StrictModel
-from app.regression import ComparisonAvailability, RegressionComparisonResponse, build_comparison
+from app.regression import (
+    ComparisonAvailability,
+    RegressionComparison,
+    RegressionComparisonResponse,
+    build_comparison,
+)
 from app.scenario_packs import (
     ScenarioPackId,
     ScenarioPackRegistry,
@@ -30,6 +35,31 @@ from app.scenarios import Scenario, ScenarioCategory, Severity
 logger = logging.getLogger(__name__)
 
 StoreResultT = TypeVar("StoreResultT")
+
+AGENT_VERSION_MAX_LENGTH = 64
+
+
+def _normalize_agent_version(value: object) -> object:
+    """Trim surrounding whitespace and treat a blank entry as "not provided"."""
+
+    if not isinstance(value, str):
+        return value
+    stripped = value.strip()
+    return stripped or None
+
+
+# The length bound sits on the `str` branch so it is never applied to `None`.
+AgentVersionValue = Annotated[str, StringConstraints(max_length=AGENT_VERSION_MAX_LENGTH)]
+AgentVersion = Annotated[
+    AgentVersionValue | None,
+    BeforeValidator(_normalize_agent_version),
+]
+"""Optional, user-supplied version metadata for the agent under test.
+
+Free-form and purely descriptive (`v1.4`, `prod-2026-08-17`, `claude-sonnet-4.5`).
+Deliberately distinct from `agent_label`, which identifies the executed
+agent/mode/target and is derived by SINAMA. Never treated as a secret.
+"""
 
 
 class TestRunLifecycleStatus(StrEnum):
@@ -69,6 +99,7 @@ class TestRunSummary(StrictModel):
     agent_target: AgentTarget = AgentTarget.BUILT_IN_DEMO
     agent_mode: AgentMode
     agent_label: str
+    agent_version: AgentVersion = None
     lifecycle_status: TestRunLifecycleStatus
     aggregate: RunAggregateCounts
     completed_scenarios: int = Field(ge=0)
@@ -85,10 +116,26 @@ class TestRunResultsResponse(StrictModel):
     results: list[ScenarioResultSummary]
 
 
+class ExplicitRunComparisonResponse(StrictModel):
+    """An on-demand comparison between two explicitly chosen completed runs.
+
+    Carries both run summaries so the UI can label the axes (agent version,
+    label, timestamps) without extra round trips. `comparison` is the same
+    `RegressionComparison` the baseline flow produces; in this direction its
+    `baseline_run_id` field holds the *reference* run.
+    """
+
+    reference_run: TestRunSummary
+    current_run: TestRunSummary
+    comparison: RegressionComparison
+
+
 class CreateTestRunRequest(StrictModel):
     pack_id: ScenarioPackId
     agent_mode: AgentMode = AgentMode.HEALTHY
     agent_target: AgentTarget = AgentTarget.BUILT_IN_DEMO
+    # Optional: clients that predate agent versioning keep working unchanged.
+    agent_version: AgentVersion = None
     external_agent: ExternalAgentConfiguration | None = None
 
 
@@ -99,6 +146,7 @@ class StoredTestRun:
     agent_target: AgentTarget
     agent_mode: AgentMode
     agent_label: str
+    agent_version: str | None = None
     lifecycle_status: TestRunLifecycleStatus = TestRunLifecycleStatus.QUEUED
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     started_at: datetime | None = None
@@ -121,6 +169,10 @@ class InvalidRunAgentConfigurationError(ValueError):
 
 class RunNotCompletedError(ValueError):
     pass
+
+
+class IncompatibleRunComparisonError(ValueError):
+    """Two runs cannot be meaningfully compared against each other."""
 
 
 class CorruptedRunRecordError(RuntimeError):
@@ -162,6 +214,7 @@ def build_run_summary(
         agent_target=record.agent_target,
         agent_mode=record.agent_mode,
         agent_label=record.agent_label,
+        agent_version=record.agent_version,
         lifecycle_status=record.lifecycle_status,
         aggregate=RunAggregateCounts(
             total=record.pack.scenario_count,
@@ -246,6 +299,45 @@ def build_comparison_response(
     )
 
 
+def build_explicit_comparison(
+    reference_record: StoredTestRun,
+    current_record: StoredTestRun,
+) -> RegressionComparison:
+    """Compare two explicitly chosen runs, reference -> current.
+
+    Independent of baseline state: calling this neither reads nor changes which
+    run is the pack baseline. Scoring is delegated to `build_comparison`; this
+    only enforces that the pairing is meaningful.
+    """
+
+    if reference_record.run_id == current_record.run_id:
+        raise IncompatibleRunComparisonError("A run cannot be compared against itself.")
+
+    for record, role in ((reference_record, "reference"), (current_record, "current")):
+        if record.lifecycle_status is not TestRunLifecycleStatus.COMPLETED:
+            raise RunNotCompletedError(f"The {role} run has not completed.")
+
+    if reference_record.pack.id != current_record.pack.id:
+        raise IncompatibleRunComparisonError(
+            "Runs from different scenario packs cannot be compared."
+        )
+
+    reference_scenarios = {result.scenario_id for result in reference_record.results}
+    current_scenarios = {result.scenario_id for result in current_record.results}
+    if reference_scenarios != current_scenarios:
+        raise IncompatibleRunComparisonError(
+            "The two runs did not execute the same set of scenarios."
+        )
+
+    return build_comparison(
+        baseline_run_id=reference_record.run_id,
+        current_run_id=current_record.run_id,
+        pack_id=current_record.pack.id,
+        baseline_results=reference_record.results,
+        current_results=current_record.results,
+    )
+
+
 class RunStore(Protocol):
     """Storage boundary shared by the in-memory and SQL run stores.
 
@@ -260,6 +352,7 @@ class RunStore(Protocol):
         *,
         agent_target: AgentTarget = AgentTarget.BUILT_IN_DEMO,
         agent_label: str | None = None,
+        agent_version: str | None = None,
     ) -> TestRunSummary: ...
 
     def mark_running(self, run_id: UUID) -> None: ...
@@ -281,6 +374,12 @@ class RunStore(Protocol):
     def set_baseline(self, run_id: UUID) -> TestRunSummary: ...
 
     def get_comparison(self, run_id: UUID) -> RegressionComparisonResponse: ...
+
+    def compare_runs(
+        self,
+        reference_run_id: UUID,
+        current_run_id: UUID,
+    ) -> ExplicitRunComparisonResponse: ...
 
     def recover_interrupted_runs(self) -> int: ...
 
@@ -305,6 +404,7 @@ class InMemoryRunStore:
         *,
         agent_target: AgentTarget = AgentTarget.BUILT_IN_DEMO,
         agent_label: str | None = None,
+        agent_version: str | None = None,
     ) -> TestRunSummary:
         with self._lock:
             record = StoredTestRun(
@@ -313,6 +413,7 @@ class InMemoryRunStore:
                 agent_target=agent_target,
                 agent_mode=agent_mode,
                 agent_label=agent_label or agent_mode.value,
+                agent_version=agent_version,
             )
             self._runs[record.run_id] = record
             self._prune_locked()
@@ -393,6 +494,20 @@ class InMemoryRunStore:
                 del self._baselines[record.pack.id]
                 baseline_id = None
             return build_comparison_response(record, baseline_id, baseline_record)
+
+    def compare_runs(
+        self,
+        reference_run_id: UUID,
+        current_run_id: UUID,
+    ) -> ExplicitRunComparisonResponse:
+        with self._lock:
+            reference = self._get_locked(reference_run_id)
+            current = self._get_locked(current_run_id)
+            return ExplicitRunComparisonResponse(
+                reference_run=self._summary_locked(reference),
+                current_run=self._summary_locked(current),
+                comparison=build_explicit_comparison(reference, current),
+            )
 
     def clear(self) -> None:
         with self._lock:
@@ -479,6 +594,7 @@ class RunService:
         *,
         agent_target: AgentTarget = AgentTarget.BUILT_IN_DEMO,
         external_agent: ExternalAgentConfiguration | None = None,
+        agent_version: str | None = None,
     ) -> TestRunSummary:
         pack = self._registry.get_pack(pack_id)
         scenarios = self._registry.load_scenarios(pack_id)
@@ -511,6 +627,7 @@ class RunService:
                 agent_mode,
                 agent_target=agent_target,
                 agent_label=agent_label,
+                agent_version=agent_version,
             )
         )
         task = asyncio.create_task(
