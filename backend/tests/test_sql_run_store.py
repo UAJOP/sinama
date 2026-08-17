@@ -206,6 +206,31 @@ def test_completed_run_and_results_survive_a_new_store_instance(engine: Engine) 
     assert detail.checks and detail.failures
 
 
+def test_agent_version_is_persisted_and_reloaded(store: SqlRunStore) -> None:
+    versioned = store.create_run(pack(), AgentMode.HEALTHY, agent_version="prod-2026-08-17")
+    unversioned = store.create_run(pack(), AgentMode.HEALTHY)
+
+    assert store.get_run(versioned.run_id).agent_version == "prod-2026-08-17"
+    # agent_label stays SINAMA-derived and is not displaced by the version.
+    assert store.get_run(versioned.run_id).agent_label == "healthy"
+    assert store.get_run(unversioned.run_id).agent_version is None
+
+
+def test_agent_version_survives_a_new_store_instance(engine: Engine) -> None:
+    first = SqlRunStore(engine)
+    summary = execute_pack(first, AgentMode.HEALTHY)
+    versioned = first.create_run(pack(), AgentMode.HEALTHY, agent_version="v9.9")
+    first.mark_completed(versioned.run_id)
+
+    second = SqlRunStore(engine)
+
+    assert second.get_run(versioned.run_id).agent_version == "v9.9"
+    assert second.get_run(summary.run_id).agent_version is None
+    by_id = {item.run_id: item for item in second.list_runs()}
+    assert by_id[versioned.run_id].agent_version == "v9.9"
+    assert second.get_results(versioned.run_id).run.agent_version == "v9.9"
+
+
 def test_baseline_survives_a_new_store_instance(engine: Engine) -> None:
     first = SqlRunStore(engine)
     baseline = execute_pack(first, AgentMode.HEALTHY)

@@ -27,6 +27,7 @@ from app.scenario_runner import RunStatus, ScenarioRunResult
 from app.test_runs import (
     INTERRUPTED_RUN_REASON,
     CorruptedRunRecordError,
+    ExplicitRunComparisonResponse,
     RunNotCompletedError,
     ScenarioResultNotFoundError,
     StoredTestRun,
@@ -36,6 +37,7 @@ from app.test_runs import (
     TestRunResultsResponse,
     TestRunSummary,
     build_comparison_response,
+    build_explicit_comparison,
     build_results_response,
     build_run_summary,
 )
@@ -83,6 +85,7 @@ class SqlRunStore:
         *,
         agent_target: AgentTarget = AgentTarget.BUILT_IN_DEMO,
         agent_label: str | None = None,
+        agent_version: str | None = None,
     ) -> TestRunSummary:
         record = StoredTestRun(
             run_id=uuid4(),
@@ -90,6 +93,7 @@ class SqlRunStore:
             agent_target=agent_target,
             agent_mode=agent_mode,
             agent_label=agent_label or agent_mode.value,
+            agent_version=agent_version,
         )
         with self._sessions.begin() as session:
             session.add(
@@ -101,6 +105,7 @@ class SqlRunStore:
                     agent_target=record.agent_target.value,
                     agent_mode=record.agent_mode.value,
                     agent_label=record.agent_label,
+                    agent_version=record.agent_version,
                     lifecycle_status=record.lifecycle_status.value,
                     created_at=record.created_at,
                     started_at=None,
@@ -290,6 +295,39 @@ class SqlRunStore:
             )
         return build_comparison_response(record, baseline_run_id, baseline_record)
 
+    def compare_runs(
+        self,
+        reference_run_id: UUID,
+        current_run_id: UUID,
+    ) -> ExplicitRunComparisonResponse:
+        with self._sessions() as session:
+            reference_row = self._require_run_row(session, reference_run_id)
+            current_row = self._require_run_row(session, current_run_id)
+
+            reference = self._record_from_row(
+                reference_row, self._results_for(session, reference_run_id)
+            )
+            current = self._record_from_row(
+                current_row, self._results_for(session, current_run_id)
+            )
+            # Reads the baseline table only to label the summaries; explicit
+            # comparison never consults or mutates baseline assignment.
+            baselines = self._baselines_for(
+                session, [reference_row.pack_id, current_row.pack_id]
+            )
+
+        return ExplicitRunComparisonResponse(
+            reference_run=build_run_summary(
+                reference,
+                is_baseline=baselines.get(reference_row.pack_id) == reference_run_id,
+            ),
+            current_run=build_run_summary(
+                current,
+                is_baseline=baselines.get(current_row.pack_id) == current_run_id,
+            ),
+            comparison=build_explicit_comparison(reference, current),
+        )
+
     # --- helpers --------------------------------------------------------------
 
     @staticmethod
@@ -369,6 +407,7 @@ class SqlRunStore:
             agent_target=AgentTarget(row.agent_target),
             agent_mode=AgentMode(row.agent_mode),
             agent_label=row.agent_label,
+            agent_version=row.agent_version,
             lifecycle_status=TestRunLifecycleStatus(row.lifecycle_status),
             created_at=_require_utc(row.created_at),
             started_at=_as_utc(row.started_at),
