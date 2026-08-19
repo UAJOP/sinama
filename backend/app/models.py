@@ -3,7 +3,7 @@ from enum import StrEnum
 from typing import Annotated, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, StringConstraints
+from pydantic import BaseModel, BeforeValidator, ConfigDict, StringConstraints
 
 
 class StrictModel(BaseModel):
@@ -30,6 +30,8 @@ class ConversationPhase(StrEnum):
 
 
 class ToolName(StrEnum):
+    """Built-in demo-agent tool names."""
+
     LOOKUP_POLICY = "lookup_policy"
     COLLECT_CLAIM_DETAILS = "collect_claim_details"
     REQUEST_DOCUMENT = "request_document"
@@ -37,6 +39,34 @@ class ToolName(StrEnum):
     HANDOFF_TO_HUMAN = "handoff_to_human"
 
 
+ToolIdentifier = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z][A-Za-z0-9_.:-]*$",
+    ),
+]
+
+
+def _preserve_builtin_tool(value: object) -> object:
+    """Keep known demo tools as ToolName while allowing validated custom names."""
+
+    if isinstance(value, ToolName):
+        return value
+    if isinstance(value, str):
+        try:
+            return ToolName(value.strip())
+        except ValueError:
+            return value
+    return value
+
+
+ToolReference = Annotated[
+    ToolName | ToolIdentifier,
+    BeforeValidator(_preserve_builtin_tool),
+]
 JsonScalar = str | int | float | bool | None
 NonEmptyMessage = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000)
@@ -45,7 +75,7 @@ NonEmptyMessage = Annotated[
 
 class ToolEvent(StrictModel):
     id: UUID
-    tool: ToolName
+    tool: ToolReference
     arguments: dict[str, JsonScalar]
     timestamp: datetime
 

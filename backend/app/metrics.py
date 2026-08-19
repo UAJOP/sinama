@@ -103,7 +103,9 @@ def _tool_usage_metric(checks: list[EvaluationCheckResult]) -> MetricScore:
 
 def _handoff_metric(checks: list[EvaluationCheckResult]) -> MetricScore:
     relevant = [
-        check for check in checks if check.evidence.expected_tool is ToolName.HANDOFF_TO_HUMAN
+        check
+        for check in checks
+        if check.evidence.expected_tool == ToolName.HANDOFF_TO_HUMAN.value
     ]
     passed = sum(check.status is EvaluationStatus.PASS for check in relevant)
     total = len(relevant)

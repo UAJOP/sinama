@@ -17,12 +17,12 @@ export type ScenarioCategory =
   | "repeated_request"
   | "failed_tool_recovery";
 
-export type ToolName =
-  | "lookup_policy"
-  | "collect_claim_details"
-  | "request_document"
-  | "submit_claim"
-  | "handoff_to_human";
+/**
+ * Tool identifiers are intentionally open-ended at the platform boundary.
+ * The built-in insurance demo uses a small known set, while external agents
+ * and future scenario packs may expose domain-specific tool names.
+ */
+export type ToolName = string;
 
 export type ConversationPhase =
   | "awaiting_intent"
@@ -372,8 +372,6 @@ export function createTestRun(
       agent_mode: agentMode,
       agent_target: agentTarget,
       external_agent: externalAgent,
-      // Omitted entirely when unset, so the request stays byte-identical to
-      // what pre-versioning clients send.
       ...(agentVersion ? { agent_version: agentVersion } : {}),
     }),
     signal,
