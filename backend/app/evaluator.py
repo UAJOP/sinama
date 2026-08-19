@@ -5,7 +5,7 @@ from typing import Literal, Protocol
 
 from pydantic import Field
 
-from app.models import JsonScalar, StrictModel, ToolEvent, ToolIdentifier, ToolName
+from app.models import JsonScalar, StrictModel, ToolEvent, ToolName, ToolReference
 from app.scenarios import Scenario, Severity
 
 
@@ -35,7 +35,7 @@ class EvaluationCategory(StrEnum):
 
 
 class EvaluationEvidence(StrictModel):
-    expected_tool: ToolIdentifier | None = None
+    expected_tool: ToolReference | None = None
     argument_name: str | None = None
     expected_value: JsonScalar = None
     actual_values: list[JsonScalar] = Field(default_factory=list)
@@ -90,7 +90,7 @@ class DeterministicToolEvaluator:
         tool_trace: list[ToolEvent],
         assistant_messages: Sequence[str] = (),
     ) -> EvaluationReport:
-        events_by_tool: dict[str, list[ToolEvent]] = defaultdict(list)
+        events_by_tool: dict[ToolReference, list[ToolEvent]] = defaultdict(list)
         for event in tool_trace:
             events_by_tool[event.tool].append(event)
 
@@ -134,7 +134,8 @@ class DeterministicToolEvaluator:
             )
 
         for index, (tool, max_count) in enumerate(
-            sorted(scenario.max_tool_call_counts.items()), start=1
+            sorted(scenario.max_tool_call_counts.items(), key=lambda item: str(item[0])),
+            start=1,
         ):
             checks.append(
                 self._tool_call_count_check(
@@ -177,7 +178,7 @@ class DeterministicToolEvaluator:
 
     @staticmethod
     def _required_tool_check(
-        tool: ToolIdentifier,
+        tool: ToolReference,
         events: list[ToolEvent],
         failure_severity: Severity,
         index: int,
@@ -202,7 +203,7 @@ class DeterministicToolEvaluator:
 
     @staticmethod
     def _argument_check(
-        tool: ToolIdentifier,
+        tool: ToolReference,
         argument_name: str,
         expected_value: JsonScalar,
         events: list[ToolEvent],
@@ -246,7 +247,7 @@ class DeterministicToolEvaluator:
     @staticmethod
     def _forbidden_tool_check(
         scenario: Scenario,
-        tool: ToolIdentifier,
+        tool: ToolReference,
         condition: str,
         events: list[ToolEvent],
         index: int,
@@ -268,7 +269,7 @@ class DeterministicToolEvaluator:
         reason = f"Forbidden tool {tool} was called."
         required_document = scenario.synthetic_context.required_document
         if (
-            tool == ToolName.SUBMIT_CLAIM.value
+            tool == ToolName.SUBMIT_CLAIM
             and required_document is not None
             and scenario.synthetic_context.document_available is False
         ):
@@ -287,7 +288,7 @@ class DeterministicToolEvaluator:
 
     @staticmethod
     def _tool_call_count_check(
-        tool: ToolIdentifier,
+        tool: ToolReference,
         max_count: int,
         events: list[ToolEvent],
         failure_severity: Severity,

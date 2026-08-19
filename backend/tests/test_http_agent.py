@@ -174,7 +174,7 @@ def test_connection_probe_distinguishes_http_schema_and_blocked_url() -> None:
     "payload",
     [
         {"tool_events": []},
-        {"message": "ok", "tool_events": [{"tool": "unknown", "arguments": {}}]},
+        {"message": "ok", "tool_events": [{"tool": "unknown tool", "arguments": {}}]},
         {
             "message": "ok",
             "tool_events": [

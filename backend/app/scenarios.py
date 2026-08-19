@@ -4,7 +4,7 @@ from typing import Annotated, Literal
 
 from pydantic import Field, StringConstraints
 
-from app.models import JsonScalar, StrictModel, ToolIdentifier
+from app.models import JsonScalar, StrictModel, ToolReference
 
 StableScenarioId = Annotated[
     str,
@@ -64,13 +64,13 @@ class SyntheticContext(StrictModel):
 
 
 class ExpectedToolCall(StrictModel):
-    name: ToolIdentifier
+    name: ToolReference
     required: bool = True
     constraints: dict[str, JsonScalar] = Field(default_factory=dict)
 
 
 class ForbiddenToolCall(StrictModel):
-    name: ToolIdentifier
+    name: ToolReference
     condition: str
 
 
@@ -100,14 +100,13 @@ class Scenario(StrictModel):
     expected_healthy_result: Literal["pass"]
     expected_broken_result: ExpectedBrokenResult | None = None
 
-    # --- Scenario Engine V2: additive metadata and opt-in deterministic checks ---
     difficulty: Difficulty = Difficulty.MEDIUM
     tags: list[str] = Field(default_factory=list)
     hidden_context: str | None = None
     expected_behaviors: list[str] = Field(default_factory=list)
     forbidden_response_phrases: list[str] = Field(default_factory=list)
     required_response_phrases: list[str] = Field(default_factory=list)
-    max_tool_call_counts: dict[ToolIdentifier, int] = Field(default_factory=dict)
+    max_tool_call_counts: dict[ToolReference, int] = Field(default_factory=dict)
     loop_detection_enabled: bool = False
 
 
