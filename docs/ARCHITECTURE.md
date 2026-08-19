@@ -39,10 +39,11 @@ Responsibilities:
 - inspect conversation and tool-call evidence
 - compare two runs
 - inspect version-aware reliability movement
+- inspect the release-readiness verdict and reasons
 
 The frontend must not contain provider secrets or privileged database keys.
 
-The `/runs` experience is split into focused components for configuration, recent history/overview, scenario evidence, regression comparison and reliability trends, with active-run polling isolated in a dedicated hook. `runs-dashboard.tsx` remains the state/orchestration coordinator instead of owning every render concern. This keeps future readiness/suite surfaces additive without changing the existing visual direction or API boundary.
+The `/runs` experience is split into focused components for configuration, recent history/overview, scenario evidence, regression comparison, reliability trends and release readiness, with active-run polling isolated in a dedicated hook. `runs-dashboard.tsx` remains the state/orchestration coordinator instead of owning every render concern. This keeps future suite/semantic surfaces additive without changing the existing visual direction or API boundary.
 
 ## Backend
 
@@ -54,6 +55,7 @@ FastAPI owns all privileged operations:
 - scoring
 - persistence
 - trend aggregation
+- release-readiness policy evaluation
 - future provider API calls
 - secret access
 
@@ -131,6 +133,22 @@ The PostgreSQL implementation must not deserialize transcript/check payloads mer
 Alembic revision `0004` adds those columns, adds a `pack_id + created_at + run_id` index on `test_runs`, and backfills existing results from their stored JSON payload exactly once. The full result payload remains canonical and unchanged.
 
 The memory backend uses its already-bounded in-process typed results, so no duplicate store-specific scoring logic is required there.
+
+### Release readiness
+
+`GET /api/runs/{run_id}/readiness` computes an on-demand `READY`, `WARNING` or `BLOCKED` verdict from evidence SINAMA already owns. It is a deterministic policy layer, not a new scoring engine.
+
+The current policy is intentionally small and auditable:
+
+- orchestration errors block release
+- scenario execution errors block release
+- HIGH or CRITICAL deterministic failures block release
+- a regression verdict blocks release
+- MEDIUM/LOW deterministic failures produce warnings
+- missing or incompatible baseline evidence produces warnings
+- a clean baseline run, or a clean compatible run whose comparison is stable/improved, is ready
+
+Every warning/blocker is a typed reason with a machine-readable code and optional scenario/failure reference. The readiness endpoint does not persist a duplicate evaluator result, mutate baseline assignment or hide the underlying checks. A future semantic judge must not silently become a blocking readiness dependency unless that policy is made explicit and separately reviewed.
 
 ## Core domain objects
 
@@ -253,6 +271,7 @@ External-agent bearer tokens are never persisted. The database URL is a `SecretS
 - `GET /api/runs/{run_id}`
 - `GET /api/runs/{run_id}/results`
 - `GET /api/runs/{run_id}/results/{scenario_id}`
+- `GET /api/runs/{run_id}/readiness`
 - `POST /api/runs/{run_id}/baseline`
 - `GET /api/runs/{run_id}/comparison`
 - `GET /api/runs/{current_run_id}/compare/{reference_run_id}`
@@ -280,9 +299,8 @@ The CI definition is the source of truth for quality status; documentation shoul
 
 ## Next architecture steps
 
-1. compute an evidence-backed release-readiness verdict
-2. add multi-pack/test-suite composition and a second vertical pack
-3. add a semantic judge in shadow mode for genuinely semantic expectations
+1. add multi-pack/test-suite composition and a second vertical pack
+2. add a semantic judge in shadow mode for genuinely semantic expectations
 
 ## Later, not now
 

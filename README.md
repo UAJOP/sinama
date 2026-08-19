@@ -54,6 +54,7 @@ The question that matters for a production support agent is not “does the chat
 6. Inspect failure evidence — the exact check, event, prerequisite or argument violation.
 7. Compare the run against a baseline or another compatible agent version.
 8. Track reliability movement across version-tagged runs.
+9. Read a deterministic release-readiness verdict derived from the same evidence.
 
 ```text
 Agent Target
@@ -71,6 +72,8 @@ Metrics + Structured Failures
 Baseline / Run Comparison
      ↓
 Version Reliability Trend
+     ↓
+Release Readiness Verdict
 ```
 
 ![Test Runs configuration screen: scenario pack, agent target, healthy/broken mode](docs/assets/readme/sinama-runs-flow.webp)
@@ -139,6 +142,17 @@ This foundation makes a second vertical possible without turning every new domai
 - Alembic revision `0004` backfills existing persisted results once so historical runs participate in trends
 - memory mode uses its already-bounded in-process result objects and needs no database
 - the `/runs` dashboard renders a lightweight responsive trend table/score rail without adding a charting dependency
+
+### Release readiness
+
+- `GET /api/runs/{run_id}/readiness` answers whether a run is `READY`, `WARNING` or `BLOCKED`
+- the verdict is computed on demand from existing lifecycle state, scenario execution errors, deterministic failure severity and baseline regression evidence
+- orchestration/scenario execution errors, HIGH/CRITICAL failures and detected regressions block release
+- MEDIUM/LOW failures and missing/incompatible baseline evidence produce a warning instead of a fabricated clean verdict
+- a clean baseline run or clean stable/improved compatible run is ready
+- every warning/blocker has a machine-readable reason code and, where applicable, the concrete scenario/failure reference
+- readiness does not persist a second score, mutate baseline state or hide the underlying deterministic evidence
+- the `/runs` overview renders the verdict in a focused component alongside the existing evidence and comparison surfaces
 
 ### Run history
 
@@ -262,6 +276,7 @@ Run API:
 - `GET /api/runs/{run_id}`
 - `GET /api/runs/{run_id}/results`
 - `GET /api/runs/{run_id}/results/{scenario_id}`
+- `GET /api/runs/{run_id}/readiness`
 - `POST /api/runs/{run_id}/baseline`
 - `GET /api/runs/{run_id}/comparison`
 - `GET /api/runs/{current_run_id}/compare/{reference_run_id}`
@@ -348,13 +363,11 @@ GitHub Actions runs the same quality gate on pull requests and integration/stabl
 - no billing
 - no distributed workers
 - no voice-agent testing
-- no release-readiness gate yet
 
 ## Next
 
-1. evidence-backed release-readiness verdict
-2. test-suite composition and a second vertical pack
-3. semantic/LLM judge in explicit shadow mode for genuinely semantic expectations
+1. test-suite composition and a second vertical pack
+2. semantic/LLM judge in explicit shadow mode for genuinely semantic expectations
 
 ## Documentation
 
