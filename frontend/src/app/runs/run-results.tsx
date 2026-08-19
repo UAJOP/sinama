@@ -293,16 +293,43 @@ function ChecksView({
                 <dd>{check.evidence.expected_tool}</dd>
               </>
             )}
+            {check.evidence.prerequisite_tool && (
+              <>
+                <dt>Prerequisite</dt>
+                <dd>{check.evidence.prerequisite_tool}</dd>
+              </>
+            )}
             {check.evidence.argument_name && (
               <>
                 <dt>Argument</dt>
                 <dd>{check.evidence.argument_name}</dd>
               </>
             )}
-            {check.evidence.argument_name && (
+            {check.type === "tool_argument_constraint" && check.evidence.argument_name && (
               <>
                 <dt>Expected value</dt>
                 <dd>{displayValue(check.evidence.expected_value)}</dd>
+              </>
+            )}
+            {check.evidence.allowed_values.length > 0 && (
+              <>
+                <dt>Allowed values</dt>
+                <dd>{displayValue(check.evidence.allowed_values)}</dd>
+              </>
+            )}
+            {check.evidence.pattern && (
+              <>
+                <dt>Pattern</dt>
+                <dd>{check.evidence.pattern}</dd>
+              </>
+            )}
+            {(check.evidence.min_value !== null || check.evidence.max_value !== null) && (
+              <>
+                <dt>Range</dt>
+                <dd>
+                  {check.evidence.min_value === null ? "−∞" : check.evidence.min_value} →{" "}
+                  {check.evidence.max_value === null ? "+∞" : check.evidence.max_value}
+                </dd>
               </>
             )}
             {check.evidence.actual_values.length > 0 && (

@@ -122,8 +122,13 @@ export interface TestRunResultsResponse {
 
 export interface EvaluationEvidence {
   expected_tool: ToolName | null;
+  prerequisite_tool: ToolName | null;
   argument_name: string | null;
   expected_value: JsonScalar;
+  allowed_values: JsonScalar[];
+  pattern: string | null;
+  min_value: number | null;
+  max_value: number | null;
   actual_values: JsonScalar[];
   matching_event: ToolEvent | null;
   offending_event: ToolEvent | null;
@@ -141,7 +146,12 @@ export type EvaluationCheckType =
   | "tool_call_count"
   | "forbidden_phrase"
   | "required_phrase"
-  | "possible_loop";
+  | "possible_loop"
+  | "tool_precondition"
+  | "tool_argument_exists"
+  | "tool_argument_one_of"
+  | "tool_argument_pattern"
+  | "tool_argument_range";
 
 export type EvaluationCheckCategory =
   | "required_tool_missing"
@@ -150,7 +160,12 @@ export type EvaluationCheckCategory =
   | "excessive_tool_calls"
   | "forbidden_phrase_detected"
   | "required_phrase_missing"
-  | "possible_loop_detected";
+  | "possible_loop_detected"
+  | "tool_precondition_violation"
+  | "tool_argument_missing"
+  | "tool_argument_not_allowed"
+  | "tool_argument_pattern_mismatch"
+  | "tool_argument_range_violation";
 
 export interface EvaluationCheck {
   check_id: string;

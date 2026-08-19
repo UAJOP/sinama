@@ -8,7 +8,7 @@ A Turkish-first reliability lab for testing customer-service AI agents before pr
 
 ![SINAMA](docs/assets/readme/sinama-case-study-hero.webp)
 
-SINAMA runs a synthetic Turkish insurance claim-intake agent through ten scripted multi-turn scenarios, then deterministically checks whether the agent called the required tools, avoided forbidden actions, used the expected structured arguments, stayed within tool-call/response-phrase constraints and avoided repeating itself — then exposes inspectable evidence, a per-dimension metric breakdown and structured failure objects when the contract is violated.
+SINAMA runs a synthetic Turkish insurance claim-intake agent through ten scripted multi-turn scenarios, then deterministically checks whether the agent called the required tools, avoided forbidden actions, respected workflow prerequisites, used valid structured arguments, stayed within tool-call/response-phrase constraints and avoided repeating itself — then exposes inspectable evidence, a per-dimension metric breakdown and structured failure objects when the contract is violated.
 
 The insurance pack is the current proof vertical, not a hard platform boundary: external agents and future scenario packs may use validated domain-specific tool identifiers, and scenario fixtures support stable vertical prefixes such as `INS-001`, `ECOM-001` and `BANK-001`.
 
@@ -38,6 +38,7 @@ A customer-service agent can sound conversationally correct while still:
 - calling the wrong tool,
 - calling the correct tool too early,
 - skipping a required step,
+- passing malformed or out-of-policy tool arguments,
 - failing to hand off correctly, or
 - violating a workflow contract.
 
@@ -50,7 +51,7 @@ The question that matters for a production support agent is not “does the chat
 3. Run multi-turn conversations against the target.
 4. Capture the transcript and structured Tool Trace.
 5. Evaluate deterministic behavioral contracts against the observed trace/responses.
-6. Inspect failure evidence — the exact check, event and missing requirement.
+6. Inspect failure evidence — the exact check, event, prerequisite or argument violation.
 7. Compare the run against a baseline or another compatible agent version.
 
 ```text
@@ -91,8 +92,9 @@ Baseline / Run Comparison
 
 - ten synthetic Turkish insurance scenarios (`INS-001`–`INS-010`) covering tool policy, safety/privacy constraints, human handoff, prompt-injection pressure, context retention, ambiguous intent, Turkish typo/noise robustness, repeated-request handling and failed-tool recovery
 - deterministic required/forbidden tool-call contracts with exact argument constraints, tool-call-count limits, forbidden/required response-phrase checks and repeated-response (loop) detection
+- opt-in typed workflow constraints for tool prerequisites/order, required argument presence, one-of allowed values, regex full-match rules and inclusive numeric ranges
+- every failed deterministic rule exposes machine-readable evidence and a structured human-readable `Failure` with expected vs. actual behavior and a concrete suggestion
 - a per-scenario metric breakdown (Goal Completion, Tool Usage, Handoff, Safety, Conversation Quality) — a dimension a scenario never exercises is reported as not applicable rather than a fabricated score
-- structured `Failure` objects per violated check (type, severity, turn, expected vs. actual, suggestion) instead of a raw check dump
 - best-effort masking of TC kimlik no / phone / card-like digit runs in transcripts and tool arguments before they reach the API response
 - evidence-backed regression detection, not a pass/fail black box
 
@@ -105,6 +107,13 @@ Baseline / Run Comparison
 - packaged scenario data no longer assumes an insurance-only directory
 
 This foundation makes a second vertical possible without turning every new domain into a core-model edit.
+
+### Test Runs dashboard
+
+- run configuration, external-agent connection, history, evidence inspection and regression views are split into focused React components
+- active-run polling is isolated in a dedicated hook and remains bounded, abortable and non-overlapping
+- the orchestration component coordinates state/data flow instead of owning every render concern
+- the refactor preserved the existing visual direction, API contracts and run behavior while making the next product surfaces safer to add
 
 ### Baseline & regression comparison
 
@@ -277,10 +286,15 @@ SINAMA currently scores:
 - forbidden tool calls
 - exact structured argument constraints
 - tool-call-count limits
+- tool prerequisites/order (`A` must occur before `B` when `B` is called)
+- required argument existence on observed tool calls
+- one-of allowed argument values
+- regex full-match argument rules
+- inclusive numeric min/max argument ranges
 - forbidden/required response phrases
 - repeated-response detection
 
-These remain deterministic substring/count/exact-value checks, not semantic understanding. If a tool is absent, its argument constraints are not evaluated; a required tool produces one missing-tool root cause rather than a cascade of argument failures.
+The rich workflow rules are typed, opt-in fixture contracts. They validate observed structured behavior rather than interpreting natural language. If an optional tool is absent, its argument rules do not create a synthetic failure; required-tool checks continue to own tool absence. Tool preconditions are conditional: when the `after` tool is never called, the precondition is not considered violated. Every generated failure retains the relevant matching/offending event when one exists.
 
 Every scored check feeds per-dimension metrics and structured failures. A dimension a scenario does not exercise is `not_applicable`, never a fabricated score.
 
@@ -320,16 +334,13 @@ GitHub Actions runs the same quality gate on pull requests and integration/stabl
 - no distributed workers
 - no voice-agent testing
 - no release-readiness gate yet
-- the `/runs` client dashboard needs a behavior-preserving component/hook extraction before substantially more UI is added
 
 ## Next
 
-1. behavior-preserving `/runs` frontend maintainability refactor
-2. richer deterministic contracts (ordering/preconditions, existence, one-of, regex/range rules)
-3. version-aware trends from persisted `agent_version` runs
-4. evidence-backed release-readiness verdict
-5. test-suite composition and a second vertical pack
-6. semantic/LLM judge in explicit shadow mode for genuinely semantic expectations
+1. version-aware trends from persisted `agent_version` runs
+2. evidence-backed release-readiness verdict
+3. test-suite composition and a second vertical pack
+4. semantic/LLM judge in explicit shadow mode for genuinely semantic expectations
 
 ## Documentation
 
