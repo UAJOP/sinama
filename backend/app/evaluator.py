@@ -108,7 +108,6 @@ def _normalize_for_loop(text: str) -> str:
 
 
 def _json_scalar_matches(actual: JsonScalar, expected: JsonScalar) -> bool:
-    # JSON booleans are distinct from numbers even though bool subclasses int in Python.
     if isinstance(actual, bool) or isinstance(expected, bool):
         return type(actual) is type(expected) and actual == expected
     return actual == expected
@@ -176,24 +175,22 @@ class DeterministicToolEvaluator:
                 )
             )
 
-        for index, constraint in enumerate(scenario.tool_order_constraints, start=1):
+        for index, order_constraint in enumerate(scenario.tool_order_constraints, start=1):
             checks.append(
                 self._tool_precondition_check(
-                    constraint,
+                    order_constraint,
                     tool_trace,
                     scenario.severity_if_failed,
                     index,
                 )
             )
 
-        for index, constraint in enumerate(scenario.argument_constraints, start=1):
-            events = events_by_tool[constraint.tool]
-            # Match the existing exact-argument semantics: absence of an optional
-            # tool is not itself an argument violation. Required-tool rules own that.
+        for index, argument_constraint in enumerate(scenario.argument_constraints, start=1):
+            events = events_by_tool[argument_constraint.tool]
             if events:
                 checks.append(
                     self._rich_argument_check(
-                        constraint,
+                        argument_constraint,
                         events,
                         scenario.severity_if_failed,
                         index,
