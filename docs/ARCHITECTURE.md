@@ -38,10 +38,11 @@ Responsibilities:
 - display scores and failure categories
 - inspect conversation and tool-call evidence
 - compare two runs
+- inspect version-aware reliability movement
 
 The frontend must not contain provider secrets or privileged database keys.
 
-The `/runs` experience is split into focused components for configuration, recent history/overview, scenario evidence and regression comparison, with active-run polling isolated in a dedicated hook. `runs-dashboard.tsx` remains the state/orchestration coordinator instead of owning every render concern. This keeps future trends/readiness/suite surfaces additive without changing the existing visual direction or API boundary.
+The `/runs` experience is split into focused components for configuration, recent history/overview, scenario evidence, regression comparison and reliability trends, with active-run polling isolated in a dedicated hook. `runs-dashboard.tsx` remains the state/orchestration coordinator instead of owning every render concern. This keeps future readiness/suite surfaces additive without changing the existing visual direction or API boundary.
 
 ## Backend
 
@@ -52,6 +53,7 @@ FastAPI owns all privileged operations:
 - tool-call normalization
 - scoring
 - persistence
+- trend aggregation
 - future provider API calls
 - secret access
 
@@ -107,6 +109,28 @@ Run lifecycle (`queued`, `running`, `completed`, `error`) is independent of scen
 Runs may carry optional user-supplied `agent_version` metadata. Any completed run can become a pack baseline, and compatible completed runs can also be compared explicitly without changing the baseline assignment. Comparison output includes run-level score delta, per-metric deltas and New / Resolved / Persistent failure sets.
 
 External endpoint/token configuration is captured only by the active task factory. The store persists only non-secret target/label/version metadata; bearer tokens are never written to run history.
+
+### Version-aware reliability trends
+
+`GET /api/scenario-packs/{pack_id}/trends` returns recent terminal runs for a scenario pack in chronological order.
+
+Trend direction does not introduce a second scoring model. It reuses:
+
+- the per-scenario Goal Completion score already consumed by normal regression comparison,
+- the same ±5 regression threshold, and
+- the same rule that a newly introduced critical failure forces `REGRESSION` even when aggregate score improves.
+
+Completed runs compare with the nearest prior compatible completed run available in the fetched history. Execution-error runs remain visible with `score: null` and never become comparison references. Compatibility uses the stored pack snapshot's stable scenario ID ordering so a changed scenario set is not treated as a normal version regression.
+
+The PostgreSQL implementation must not deserialize transcript/check payloads merely to render trend history. `scenario_results` therefore duplicates only small queryable metadata derived from the canonical typed result on write:
+
+- `severity`
+- `goal_score`
+- `critical_failure_keys`
+
+Alembic revision `0004` adds those columns, adds a `pack_id + created_at + run_id` index on `test_runs`, and backfills existing results from their stored JSON payload exactly once. The full result payload remains canonical and unchanged.
+
+The memory backend uses its already-bounded in-process typed results, so no duplicate store-specific scoring logic is required there.
 
 ## Core domain objects
 
@@ -192,7 +216,7 @@ Scenarios stay repository-backed fixtures. Run history sits behind one `RunStore
 - `memory` (default) — bounded single-process store. No database is required and nothing survives a restart.
 - `postgres` — SQLAlchemy 2.x + psycopg 3 against standard PostgreSQL, including Supabase-compatible connection strings. SINAMA deliberately has no Supabase SDK/REST coupling.
 
-Both backends render API models through the same projection helpers in `app/test_runs.py`, and both delegate regression scoring to `build_comparison()`. Neither backend owns evaluation logic.
+Both backends render API models through shared projections/evaluation semantics. Regression scoring and trend direction are owned by evaluator/regression modules rather than storage.
 
 ### Schema and database hardening
 
@@ -202,8 +226,8 @@ When the PostgreSQL run store is enabled, startup additionally applies an idempo
 
 Current tables:
 
-- `test_runs` — run identity, lifecycle timestamps, agent target/mode/label/version, orchestration error and a **snapshot of the scenario pack as executed**
-- `scenario_results` — one row per scenario result, ordered by explicit `position`; the typed result is stored as JSON/JSONB with `scenario_id` and `status` duplicated for real queries
+- `test_runs` — run identity, lifecycle timestamps, agent target/mode/label/version, orchestration error and a **snapshot of the scenario pack as executed**; indexed by pack/time for trend history
+- `scenario_results` — one row per scenario result, ordered by explicit `position`; the typed result remains stored as JSON/JSONB, with `scenario_id`, `status`, `severity`, `goal_score` and critical failure fingerprints duplicated only for actual queries
 - `run_baselines` — one baseline row per `pack_id`
 
 Persisted payloads are re-validated through Pydantic models on read; incompatible/corrupt payloads fail through typed errors rather than being trusted as arbitrary JSON.
@@ -223,6 +247,7 @@ External-agent bearer tokens are never persisted. The database URL is a `SecretS
 - `GET /health`
 - `POST /api/agents/external/test-connection`
 - `GET /api/scenario-packs`
+- `GET /api/scenario-packs/{pack_id}/trends`
 - `POST /api/runs`
 - `GET /api/runs?limit=20`
 - `GET /api/runs/{run_id}`
@@ -250,14 +275,14 @@ The CI definition is the source of truth for quality status; documentation shoul
 - deterministic evaluators by default
 - explicit opt-in for future paid LLM evaluation
 - bounded scenario/run behavior in development
+- no charting dependency for the compact trend surface
 - no Redis/Celery/Kafka until execution volume justifies it
 
 ## Next architecture steps
 
-1. expose version-aware trend rollups from persisted runs
-2. compute an evidence-backed release-readiness verdict
-3. add multi-pack/test-suite composition and a second vertical pack
-4. add a semantic judge in shadow mode for genuinely semantic expectations
+1. compute an evidence-backed release-readiness verdict
+2. add multi-pack/test-suite composition and a second vertical pack
+3. add a semantic judge in shadow mode for genuinely semantic expectations
 
 ## Later, not now
 

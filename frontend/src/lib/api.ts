@@ -17,11 +17,6 @@ export type ScenarioCategory =
   | "repeated_request"
   | "failed_tool_recovery";
 
-/**
- * Tool identifiers are intentionally open-ended at the platform boundary.
- * The built-in insurance demo uses a small known set, while external agents
- * and future scenario packs may expose domain-specific tool names.
- */
 export type ToolName = string;
 
 export type ConversationPhase =
@@ -91,7 +86,6 @@ export interface TestRunSummary {
   agent_target: AgentTarget;
   agent_mode: AgentMode;
   agent_label: string;
-  /** Optional user-supplied version metadata. Distinct from agent_label. */
   agent_version: string | null;
   lifecycle_status: RunLifecycleStatus;
   aggregate: RunAggregate;
@@ -102,6 +96,41 @@ export interface TestRunSummary {
   started_at: string | null;
   completed_at: string | null;
   error: RunExecutionError | null;
+}
+
+export interface TrendOutcomeCounts {
+  total: number;
+  passed: number;
+  failed: number;
+  errors: number;
+}
+
+export interface TrendSeverityCounts {
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+}
+
+export interface RunTrendPoint {
+  run_id: string;
+  pack_id: string;
+  agent_label: string;
+  agent_version: string | null;
+  lifecycle_status: "completed" | "error";
+  created_at: string;
+  is_baseline: boolean;
+  score: number | null;
+  outcomes: TrendOutcomeCounts;
+  severities: TrendSeverityCounts;
+  reference_run_id: string | null;
+  score_delta: number | null;
+  direction: RegressionStatus | null;
+}
+
+export interface RunTrendResponse {
+  pack_id: string;
+  points: RunTrendPoint[];
 }
 
 export interface ScenarioResultSummary {
@@ -321,9 +350,7 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
       cache: "no-store",
     });
   } catch (cause) {
-    if (cause instanceof DOMException && cause.name === "AbortError") {
-      throw cause;
-    }
+    if (cause instanceof DOMException && cause.name === "AbortError") throw cause;
     throw new Error(
       "Backend'e ulaşılamadı. FastAPI servisinin 8000 portunda çalıştığını kontrol edin.",
     );
@@ -333,9 +360,7 @@ async function request<T>(path: string, init: RequestInit): Promise<T> {
     let detail = `API isteği başarısız oldu (${response.status}).`;
     try {
       const payload = (await response.json()) as { detail?: string };
-      if (typeof payload.detail === "string") {
-        detail = payload.detail;
-      }
+      if (typeof payload.detail === "string") detail = payload.detail;
     } catch {
       // Keep the safe status-based message when the server does not return JSON.
     }
@@ -363,13 +388,22 @@ export function sendConversationMessage(
 }
 
 export function resetConversation(conversationId: string): Promise<ConversationResponse> {
-  return request(`/api/demo-agent/conversations/${conversationId}/reset`, {
-    method: "POST",
-  });
+  return request(`/api/demo-agent/conversations/${conversationId}/reset`, { method: "POST" });
 }
 
 export function listScenarioPacks(signal?: AbortSignal): Promise<ScenarioPack[]> {
   return request("/api/scenario-packs", { method: "GET", signal });
+}
+
+export function listRunTrends(
+  packId: string,
+  limit = 20,
+  signal?: AbortSignal,
+): Promise<RunTrendResponse> {
+  return request(`/api/scenario-packs/${encodeURIComponent(packId)}/trends?limit=${limit}`, {
+    method: "GET",
+    signal,
+  });
 }
 
 export function createTestRun(
@@ -411,7 +445,6 @@ export function listRecentRuns(
   return request(`/api/runs?limit=${limit}`, { method: "GET", signal });
 }
 
-/** Explicit reference -> current comparison. Never touches baseline state. */
 export function compareRuns(
   currentRunId: string,
   referenceRunId: string,

@@ -1,0 +1,136 @@
+.section {
+  margin-top: 16px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(9, 19, 17, 0.96);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.16);
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-bottom: 14px;
+}
+
+.header h2 { margin: 0; font-size: 16px; letter-spacing: -0.025em; }
+.header p { max-width: 680px; margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.55; }
+.header code {
+  padding: 6px 8px;
+  border: 1px solid #27423a;
+  border-radius: 8px;
+  color: #8ba59d;
+  background: #08130f;
+  font-size: 9px;
+}
+
+.state {
+  padding: 18px;
+  border: 1px dashed #29423b;
+  border-radius: 11px;
+  color: #78928a;
+  background: #08120f;
+  font-size: 11px;
+}
+
+.state button {
+  margin-left: 10px;
+  border: 0;
+  color: var(--green);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+.table { display: grid; gap: 7px; }
+.row {
+  display: grid;
+  grid-template-columns: minmax(150px, 1.1fr) minmax(130px, 0.8fr) minmax(145px, 0.9fr) minmax(170px, 1fr) minmax(135px, 0.8fr) 112px;
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #1d332d;
+  border-radius: 10px;
+  background: #091411;
+}
+
+.labels {
+  padding-top: 0;
+  padding-bottom: 5px;
+  border: 0;
+  color: #65827a;
+  background: transparent;
+  font: 700 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.identity, .score, .direction, .outcomes, .severity, .time { min-width: 0; }
+.identity { display: grid; gap: 3px; }
+.identity strong { overflow: hidden; color: var(--text); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.identity small { overflow: hidden; color: #708a82; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.identity em {
+  width: fit-content;
+  padding: 3px 5px;
+  border: 1px solid #315447;
+  border-radius: 999px;
+  color: var(--green);
+  background: #0e281f;
+  font: 700 7px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-style: normal;
+  letter-spacing: 0.08em;
+}
+
+.score { display: grid; grid-template-columns: 34px 1fr; gap: 8px; align-items: center; }
+.score strong { font: 800 13px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.track { height: 5px; overflow: hidden; border-radius: 999px; background: #172a25; }
+.track span { display: block; height: 100%; border-radius: inherit; background: var(--green); }
+.errorScore { color: #a17979; }
+
+.direction { display: flex; align-items: center; gap: 7px; }
+.direction span {
+  padding: 4px 6px;
+  border: 1px solid #29413a;
+  border-radius: 999px;
+  color: #8ca39c;
+  font: 700 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-transform: uppercase;
+}
+.direction strong { color: #78928a; font: 800 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.improved span { border-color: #315f4f; color: #72d5aa; background: #0e281f; }
+.regression span { border-color: #643b3b; color: #e59696; background: #291414; }
+.stable span { border-color: #4e4b32; color: #c9bc73; background: #211f10; }
+
+.outcomes, .severity { display: flex; flex-wrap: wrap; gap: 5px; }
+.outcomes span, .severity span {
+  padding: 4px 5px;
+  border-radius: 6px;
+  background: #101e1a;
+  color: #8ca39c;
+  font: 700 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.pass { color: #72d5aa !important; }
+.fail, .critical { color: #e59696 !important; }
+.high { color: #d8aa79 !important; }
+.error { color: #c48b8b !important; }
+
+.time { color: #6f8981; font: 600 9px/1.35 ui-monospace, SFMono-Regular, Menlo, monospace; text-align: right; }
+
+@media (max-width: 1080px) {
+  .labels { display: none; }
+  .row { grid-template-columns: 1.1fr 0.9fr 0.9fr; }
+  .outcomes, .severity, .time { justify-content: flex-start; text-align: left; }
+}
+
+@media (max-width: 700px) {
+  .section { padding: 14px; }
+  .header { display: grid; }
+  .header code { width: fit-content; }
+  .row { grid-template-columns: 1fr 1fr; }
+  .identity { grid-column: 1 / -1; }
+  .time { text-align: left; }
+}

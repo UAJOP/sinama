@@ -70,10 +70,8 @@ class RegressionComparisonResponse(StrictModel):
     comparison: RegressionComparison | None = None
 
 
-def _scenario_goal_score(result: ScenarioRunResult) -> int:
-    """A scenario always contributes a 0-100 score: errored/unevaluated scenarios
-    count as 0, since an unevaluated scenario is at least as bad a reliability
-    signal as a fully failed one."""
+def scenario_goal_score(result: ScenarioRunResult) -> int:
+    """Return the exact per-scenario score used by run-level regression scoring."""
 
     goal = next(
         (
@@ -91,7 +89,7 @@ def _scenario_goal_score(result: ScenarioRunResult) -> int:
 def run_score(results: list[ScenarioRunResult]) -> int:
     if not results:
         return 0
-    return round(mean(_scenario_goal_score(result) for result in results))
+    return round(mean(scenario_goal_score(result) for result in results))
 
 
 def _dimension_score(results: list[ScenarioRunResult], dimension: MetricDimension) -> int | None:
@@ -124,8 +122,6 @@ def compare_metrics(
     for dimension in MetricDimension:
         baseline_score = _dimension_score(baseline_results, dimension)
         current_score = _dimension_score(current_results, dimension)
-        # A missing score on either side can't produce a meaningful delta - report
-        # not_applicable rather than treating the missing side as zero.
         if baseline_score is None or current_score is None:
             comparisons.append(
                 MetricComparison(
@@ -150,16 +146,23 @@ def compare_metrics(
     return comparisons
 
 
-def _fingerprint(scenario_id: str, failure: Failure) -> str:
-    # Turn number is deliberately excluded: the same regression recurring a turn
-    # later due to an unrelated conversation change should still count as the
-    # same failure, not a new one.
+def failure_fingerprint(scenario_id: str, failure: Failure) -> str:
+    """Stable failure identity shared by regression diffs and trend metadata."""
+
     return f"{scenario_id}:{failure.type.value}:{failure.title}"
+
+
+def critical_failure_fingerprints(result: ScenarioRunResult) -> set[str]:
+    return {
+        failure_fingerprint(result.scenario_id, failure)
+        for failure in result.failures
+        if failure.severity is Severity.CRITICAL
+    }
 
 
 def _index_failures(results: list[ScenarioRunResult]) -> dict[str, ScenarioFailure]:
     return {
-        _fingerprint(result.scenario_id, failure): ScenarioFailure(
+        failure_fingerprint(result.scenario_id, failure): ScenarioFailure(
             scenario_id=result.scenario_id, failure=failure
         )
         for result in results
@@ -173,7 +176,6 @@ def diff_failures(
 ) -> tuple[list[ScenarioFailure], list[ScenarioFailure], list[ScenarioFailure]]:
     baseline_index = _index_failures(baseline_results)
     current_index = _index_failures(current_results)
-
     new_failures = [current_index[key] for key in current_index.keys() - baseline_index.keys()]
     resolved_failures = [
         baseline_index[key] for key in baseline_index.keys() - current_index.keys()
