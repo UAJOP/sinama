@@ -31,9 +31,12 @@ The repository already includes:
 - persistent run history and baseline assignment
 - optional `agent_version` metadata
 - baseline regression comparison and explicit run-to-run comparison
+- version-aware reliability trends with PostgreSQL query metadata/backfill
+- deterministic `READY` / `WARNING` / `BLOCKED` release-readiness policy with machine-readable reasons
 - startup recovery for interrupted persisted runs
 - PostgreSQL RLS hardening for persistence tables
 - a behavior-preserving `/runs` maintainability refactor with focused UI components and an isolated polling hook
+- focused trend and release-readiness UI surfaces that do not re-grow the dashboard monolith
 - CI gates for backend tests/lint/typechecking and frontend lint/typechecking/build
 
 ## Platform boundary
@@ -62,6 +65,21 @@ Prefer small typed rules over a general expression language. The evaluator curre
 A prerequisite rule fails when its `after` tool is observed before the required `before` tool. If the `after` tool never occurs, the conditional rule is not violated. Rich argument rules validate every observed call of their target tool. If an optional tool is absent, argument rules do not invent a failure; required-tool checks own tool absence.
 
 Each failed deterministic rule must retain concrete `EvaluationEvidence` and map to a structured `Failure`. New deterministic checks should feed existing metric dimensions instead of creating parallel scoring semantics.
+
+## Release-readiness policy
+
+Release readiness is an on-demand policy over evidence that already exists; it is not another score and is not persisted separately.
+
+Current rules:
+
+- orchestration/scenario execution errors => `BLOCKED`
+- HIGH/CRITICAL deterministic failures => `BLOCKED`
+- detected baseline regression => `BLOCKED`
+- MEDIUM/LOW deterministic failures => `WARNING`
+- missing/incompatible baseline evidence => `WARNING`
+- clean baseline or clean stable/improved compatible run => `READY`
+
+Every warning/blocker must keep a typed reason code and relevant scenario/failure reference when one exists. Do not make a future semantic judge silently block release; shadow-mode semantic evidence remains advisory unless a separate policy change explicitly promotes it.
 
 ## Development workflow
 
@@ -99,7 +117,7 @@ GitHub Actions runs the same quality gate on PRs and integration/stable pushes.
 - Prefer typed Pydantic/TypeScript contracts over loosely shaped dictionaries at public boundaries.
 - Prefer deterministic evaluation whenever the rule can be represented structurally.
 - Do not add arbitrary executable expressions or user-authored code to scenario fixtures.
-- Do not add a second scoring system inside storage, UI or regression modules.
+- Do not add a second scoring system inside storage, UI, regression or readiness modules.
 - Persisted payloads must remain readable/validatable through explicit model contracts and migrations.
 - Keep memory and SQL stores behaviorally aligned through shared projections/evaluation logic.
 - Do not introduce Redis, Celery, Kafka or another queue until a real durability/throughput requirement exists.
@@ -108,19 +126,13 @@ GitHub Actions runs the same quality gate on PRs and integration/stable pushes.
 
 ## Immediate roadmap
 
-### 1. Version-aware trends
-
-Use persisted `agent_version` data to expose compact run/version history and reliability movement. Avoid building a general analytics platform; start with version, run score, pass/fail/error counts, severity counts and regression direction.
-
-### 2. Release readiness
-
-Answer the product's core question directly: “Is this agent version safe enough to release?” Build the verdict from existing deterministic evidence, orchestration errors, severity and regression state rather than inventing a disconnected score.
-
-### 3. Test suites / second vertical
+### 1. Test suites / second vertical
 
 Compose scenario groups beyond one insurance pack and prove the generic boundary with a small second vertical such as e-commerce or banking. Keep scenario ground truth hand-reviewed and include at least one domain-specific tool identifier outside the insurance demo enum.
 
-### 4. Semantic judge shadow mode
+The second vertical must run through the same runner/evaluator/store/readiness stack without introducing domain-specific branches into core scoring logic.
+
+### 2. Semantic judge shadow mode
 
 Add LLM-based evaluation only for expectations that cannot be expressed deterministically, such as unsupported promises, intent satisfaction or internal-instruction disclosure. Judge output must be structured, evidence-backed, explicitly marked semantic and initially non-blocking/shadow-mode.
 
