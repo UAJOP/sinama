@@ -48,18 +48,12 @@ def _normalize_agent_version(value: object) -> object:
     return stripped or None
 
 
-# The length bound sits on the `str` branch so it is never applied to `None`.
 AgentVersionValue = Annotated[str, StringConstraints(max_length=AGENT_VERSION_MAX_LENGTH)]
 AgentVersion = Annotated[
     AgentVersionValue | None,
     BeforeValidator(_normalize_agent_version),
 ]
-"""Optional, user-supplied version metadata for the agent under test.
-
-Free-form and purely descriptive (`v1.4`, `prod-2026-08-17`, `claude-sonnet-4.5`).
-Deliberately distinct from `agent_label`, which identifies the executed
-agent/mode/target and is derived by SINAMA. Never treated as a secret.
-"""
+"""Optional, user-supplied version metadata for the agent under test."""
 
 
 class TestRunLifecycleStatus(StrEnum):
@@ -117,13 +111,7 @@ class TestRunResultsResponse(StrictModel):
 
 
 class ExplicitRunComparisonResponse(StrictModel):
-    """An on-demand comparison between two explicitly chosen completed runs.
-
-    Carries both run summaries so the UI can label the axes (agent version,
-    label, timestamps) without extra round trips. `comparison` is the same
-    `RegressionComparison` the baseline flow produces; in this direction its
-    `baseline_run_id` field holds the *reference* run.
-    """
+    """An on-demand comparison between two explicitly chosen completed runs."""
 
     reference_run: TestRunSummary
     current_run: TestRunSummary
@@ -131,10 +119,11 @@ class ExplicitRunComparisonResponse(StrictModel):
 
 
 class CreateTestRunRequest(StrictModel):
+    # Kept as `pack_id` for backwards compatibility. The ID may now refer to a
+    # first-class pack or a typed suite resolved by ScenarioPackRegistry.
     pack_id: ScenarioPackId
     agent_mode: AgentMode = AgentMode.HEALTHY
     agent_target: AgentTarget = AgentTarget.BUILT_IN_DEMO
-    # Optional: clients that predate agent versioning keep working unchanged.
     agent_version: AgentVersion = None
     external_agent: ExternalAgentConfiguration | None = None
 
@@ -188,23 +177,13 @@ TERMINAL_LIFECYCLE_STATUSES = frozenset(
 )
 
 
-# --- Shared projections -------------------------------------------------------
-# Every run store renders the same API models from these helpers, so memory and
-# SQL backends cannot drift into two different notions of "the same run".
-
-
 def build_run_summary(
     record: StoredTestRun,
     *,
     is_baseline: bool,
     statuses: Sequence[RunStatus] | None = None,
 ) -> TestRunSummary:
-    """Project a stored run onto the public summary model.
-
-    `statuses` lets a store that has deliberately not loaded full result payloads
-    supply the per-scenario outcomes it already knows (see `SqlRunStore.get_run`,
-    which aggregates them in SQL instead of deserializing every transcript).
-    """
+    """Project a stored run onto the public summary model."""
 
     observed = [result.status for result in record.results] if statuses is None else list(statuses)
     return TestRunSummary(
@@ -267,16 +246,8 @@ def build_comparison_response(
     baseline_run_id: UUID | None,
     baseline_record: StoredTestRun | None,
 ) -> RegressionComparisonResponse:
-    """Resolve comparison availability, then delegate scoring to `build_comparison`.
-
-    Regression semantics live in `app.regression` only - this decides *whether* a
-    comparison is possible, never what the numbers mean.
-    """
-
     if baseline_run_id is None:
         return RegressionComparisonResponse(status=ComparisonAvailability.NO_BASELINE)
-    # Checked before `baseline_record`: a run compared against itself needs no
-    # loaded baseline payloads, so stores are free to leave that argument None.
     if baseline_run_id == record.run_id:
         return RegressionComparisonResponse(status=ComparisonAvailability.IS_BASELINE)
     if baseline_record is None:
@@ -303,13 +274,6 @@ def build_explicit_comparison(
     reference_record: StoredTestRun,
     current_record: StoredTestRun,
 ) -> RegressionComparison:
-    """Compare two explicitly chosen runs, reference -> current.
-
-    Independent of baseline state: calling this neither reads nor changes which
-    run is the pack baseline. Scoring is delegated to `build_comparison`; this
-    only enforces that the pairing is meaningful.
-    """
-
     if reference_record.run_id == current_record.run_id:
         raise IncompatibleRunComparisonError("A run cannot be compared against itself.")
 
@@ -339,12 +303,6 @@ def build_explicit_comparison(
 
 
 class RunStore(Protocol):
-    """Storage boundary shared by the in-memory and SQL run stores.
-
-    Every method is synchronous: FastAPI already runs `def` endpoints in a
-    threadpool, and `RunService` moves its calls off the event loop explicitly.
-    """
-
     def create_run(
         self,
         pack: ScenarioPackSummary,
@@ -460,8 +418,6 @@ class InMemoryRunStore:
             return [self._summary_locked(record) for record in reversed(recent)]
 
     def recover_interrupted_runs(self) -> int:
-        """No-op: an in-memory store always starts empty, so nothing can be orphaned."""
-
         return 0
 
     def get_result(self, run_id: UUID, scenario_id: str) -> ScenarioRunResult:
@@ -489,8 +445,6 @@ class InMemoryRunStore:
             baseline_id = self._baselines.get(record.pack.id)
             baseline_record = self._runs.get(baseline_id) if baseline_id is not None else None
             if baseline_id is not None and baseline_id != run_id and baseline_record is None:
-                # The baseline run aged out of the bounded store - self-heal the
-                # stale mapping instead of leaving a dangling reference around.
                 del self._baselines[record.pack.id]
                 baseline_id = None
             return build_comparison_response(record, baseline_id, baseline_record)
@@ -579,12 +533,6 @@ class RunService:
 
     @staticmethod
     async def _store_call(operation: Callable[[], StoreResultT]) -> StoreResultT:
-        """Run a synchronous store operation without blocking the event loop.
-
-        The SQL store performs real network I/O; the in-memory store is trivial
-        but thread-safe, so both are safe to hand to a worker thread.
-        """
-
         return await asyncio.to_thread(operation)
 
     async def create_run(
@@ -596,8 +544,15 @@ class RunService:
         external_agent: ExternalAgentConfiguration | None = None,
         agent_version: str | None = None,
     ) -> TestRunSummary:
-        pack = self._registry.get_pack(pack_id)
-        scenarios = self._registry.load_scenarios(pack_id)
+        pack = self._registry.get_collection(pack_id)
+        scenarios = self._registry.load_collection_scenarios(pack_id)
+
+        if agent_target not in pack.allowed_agent_targets:
+            allowed = ", ".join(target.value for target in pack.allowed_agent_targets)
+            raise InvalidRunAgentConfigurationError(
+                f"Scenario collection {pack.id} supports only these agent targets: {allowed}."
+            )
+
         if agent_target is AgentTarget.BUILT_IN_DEMO:
             if external_agent is not None:
                 raise InvalidRunAgentConfigurationError(
@@ -670,8 +625,6 @@ class RunService:
                     )
                 )
             except Exception:
-                # A store that is itself unavailable must not mask the original
-                # orchestration failure or leave an unhandled task exception.
                 logger.exception("Could not persist the error state for test run %s", run_id)
 
     def _forget_task(self, run_id: UUID, task: asyncio.Task[None]) -> None:
@@ -681,13 +634,6 @@ class RunService:
 
 
 def build_run_store(settings: Settings | None = None) -> RunStore:
-    """Select the configured run store.
-
-    The SQL store is imported lazily so that a memory-backed deployment never
-    needs the database driver installed, and so this module stays importable
-    while `app.db.sql_run_store` imports its record types from here.
-    """
-
     resolved = settings or get_settings()
     if resolved.run_store_backend is RunStoreBackend.MEMORY:
         return InMemoryRunStore(max_runs=resolved.run_history_limit)
