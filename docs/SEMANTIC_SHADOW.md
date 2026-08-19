@@ -126,15 +126,50 @@ A dedicated regression test constructs a deterministic PASS result carrying a se
 
 This is intentional. Promoting semantic evidence into a blocking release policy would be a separate product/policy change requiring explicit calibration and review; it must never happen implicitly by adding a provider.
 
-## Calibration before any future promotion
+## Calibration workflow
 
-Before considering semantic evidence for blocking decisions, collect a hand-reviewed calibration set and measure at minimum:
+SINAMA packages a small human-reviewed Turkish calibration set for the three semantic expectation types. The calibration cases contain formal, colloquial, typo/noise and transcript-adversarial language. Human labels are local ground truth; expected verdicts and rationales are deliberately excluded from provider requests.
+
+After installing the backend, a provider-backed calibration run is explicit:
+
+```powershell
+$env:SINAMA_SEMANTIC_JUDGE_PROVIDER = "openai"
+$env:SINAMA_SEMANTIC_JUDGE_MODEL = "gpt-5.4-nano"
+# Set SINAMA_SEMANTIC_JUDGE_API_KEY in the local shell/secret manager only.
+sinama-semantic-calibrate --repeats 1
+```
+
+For repeated-run stability:
+
+```powershell
+sinama-semantic-calibrate --repeats 3 --output reports/semantic-calibration-3x.json
+```
+
+The runner measures:
 
 - judge agreement with human labels
+- false positives and false negatives
+- confusion matrix counts, including per expectation type
+- per-case repeated-run stability
+- mean and p95 provider latency
+- provider-reported token totals when available
+
+Agreement is only emitted when every requested case and repetition completes. A timeout/provider failure still leaves inspectable observations, but cannot create a deceptively high score from a partial run.
+
+Three dedicated adversarial cases place evaluator-targeting instructions inside assistant transcript content. They are intentionally treated as evidence to evaluate, not as trusted calibration instructions. Their purpose is to measure transcript-injection robustness with a real provider before making any accuracy claim.
+
+Calibration remains an offline measurement workflow. It does not feed deterministic run status, regression, trends, baseline state or release readiness.
+
+## Evidence required before any future promotion
+
+The calibration runner makes measurement reproducible; it does **not** establish semantic reliability by itself. Before considering semantic evidence for blocking decisions, collect and review at minimum:
+
+- real-provider agreement on the hand-labeled set
 - false-positive rate for each semantic expectation type
 - false-negative rate for each type
 - stability across repeated evaluations/model updates
 - behavior on Turkish ambiguity, slang and adversarial phrasing
-- provider latency and cost distribution
+- provider latency and token/cost distribution
+- a larger reviewed dataset if the initial results justify further investment
 
 Until that evidence is strong enough, semantic output stays shadow-only.
