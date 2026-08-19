@@ -41,6 +41,13 @@
   "required_response_phrases": [
     "Hangi işlemi"
   ],
+  "semantic_expectations": [
+    {
+      "id": "clarify_then_follow_user_intent",
+      "type": "intent_satisfaction",
+      "rubric": "Evaluate the conversation as a sequence. Pass when the assistant first seeks clarification rather than committing to an unsupported intent, then responds consistently after the user clarifies they want to open a damage claim. Fail when it confidently assumes the initial ambiguous intent or ignores the clarified claim intent. Use uncertain when the conversation is too incomplete to judge."
+    }
+  ],
   "deterministic_checks": [
     "clarifying_question_asked_for_ambiguous_intent",
     "no_tool_called_before_clarification"
