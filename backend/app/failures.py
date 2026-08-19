@@ -38,6 +38,14 @@ def _resolve_turn(check: EvaluationCheckResult, event_turn: dict[UUID, int]) -> 
     return None
 
 
+def _range_description(min_value: float | None, max_value: float | None) -> str:
+    if min_value is not None and max_value is not None:
+        return f"between {min_value} and {max_value}, inclusive"
+    if min_value is not None:
+        return f"at least {min_value}"
+    return f"at most {max_value}"
+
+
 def _to_failure(check: EvaluationCheckResult, event_turn: dict[UUID, int]) -> Failure:
     evidence = check.evidence
     severity = check.severity or Severity.MEDIUM
@@ -68,6 +76,38 @@ def _to_failure(check: EvaluationCheckResult, event_turn: dict[UUID, int]) -> Fa
             "Cache or short-circuit repeated tool calls once the required data has "
             "already been retrieved."
         )
+    elif check.type is EvaluationCheckType.TOOL_PRECONDITION:
+        title = f"{evidence.expected_tool} was called before its prerequisite"
+        expected = (
+            f"{evidence.prerequisite_tool} should occur before {evidence.expected_tool}."
+        )
+        actual = check.reason
+        suggestion = (
+            f"Gate {evidence.expected_tool} until {evidence.prerequisite_tool} has completed "
+            "successfully in the current workflow."
+        )
+    elif check.type is EvaluationCheckType.TOOL_ARGUMENT_EXISTS:
+        title = f"Required argument {evidence.argument_name} was missing"
+        expected = f"Every {evidence.expected_tool} call should include {evidence.argument_name}."
+        actual = "At least one observed tool call omitted the argument."
+        suggestion = "Validate required tool arguments before dispatching the tool call."
+    elif check.type is EvaluationCheckType.TOOL_ARGUMENT_ONE_OF:
+        title = f"Unexpected value for {evidence.argument_name}"
+        expected = f"Allowed value(s): {evidence.allowed_values!r}."
+        actual = f"Observed value(s): {evidence.actual_values!r}."
+        suggestion = "Constrain the tool argument to the scenario-approved value set."
+    elif check.type is EvaluationCheckType.TOOL_ARGUMENT_PATTERN:
+        title = f"Invalid format for {evidence.argument_name}"
+        expected = f"Value should fully match pattern {evidence.pattern!r}."
+        actual = f"Observed value(s): {evidence.actual_values!r}."
+        suggestion = "Normalize and validate the argument format before invoking the tool."
+    elif check.type is EvaluationCheckType.TOOL_ARGUMENT_RANGE:
+        title = f"Out-of-range value for {evidence.argument_name}"
+        expected = (
+            f"Value should be {_range_description(evidence.min_value, evidence.max_value)}."
+        )
+        actual = f"Observed value(s): {evidence.actual_values!r}."
+        suggestion = "Validate numeric bounds before dispatching the tool call."
     elif check.type is EvaluationCheckType.FORBIDDEN_PHRASE:
         title = "Agent used a forbidden phrase"
         expected = f"Responses should not contain: {evidence.condition!r}."

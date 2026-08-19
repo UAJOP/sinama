@@ -24,13 +24,16 @@ The repository already includes:
 - SSRF-hardened external HTTP agent testing with ephemeral bearer tokens
 - deterministic required/forbidden tool checks and exact argument checks
 - tool-call-count, required/forbidden phrase and loop-repetition checks
-- transcripts, structured tool traces, per-dimension metrics and structured failures
+- typed workflow constraints for tool prerequisites/order, argument existence, one-of values, regex full-match rules and inclusive numeric ranges
+- inspectable evidence and structured `Failure` output for every deterministic violation
+- transcripts, structured tool traces and per-dimension metrics
 - in-memory and PostgreSQL run stores behind one interface
 - persistent run history and baseline assignment
 - optional `agent_version` metadata
 - baseline regression comparison and explicit run-to-run comparison
 - startup recovery for interrupted persisted runs
 - PostgreSQL RLS hardening for persistence tables
+- a behavior-preserving `/runs` maintainability refactor with focused UI components and an isolated polling hook
 - CI gates for backend tests/lint/typechecking and frontend lint/typechecking/build
 
 ## Platform boundary
@@ -40,6 +43,25 @@ Do not couple future external-agent support to the insurance demo's `ToolName` e
 Known insurance demo tools retain their enum representation for backward compatibility, but external agents and scenario contracts support validated custom tool identifiers. Scenario IDs support vertical prefixes such as `INS-001`, `ECOM-001` and `BANK-001`, and fixtures are discovered from vertical directories below `app/scenario_data/`.
 
 The insurance demo is a proof pack, not the product domain.
+
+## Deterministic evaluator contract
+
+Prefer small typed rules over a general expression language. The evaluator currently supports:
+
+- required/forbidden tools
+- exact argument values
+- call-count limits
+- required/forbidden response phrases
+- repeated-response detection
+- conditional tool prerequisites/order
+- argument existence
+- one-of allowed values
+- regex full-match format rules
+- inclusive numeric min/max ranges
+
+A prerequisite rule fails when its `after` tool is observed before the required `before` tool. If the `after` tool never occurs, the conditional rule is not violated. Rich argument rules validate every observed call of their target tool. If an optional tool is absent, argument rules do not invent a failure; required-tool checks own tool absence.
+
+Each failed deterministic rule must retain concrete `EvaluationEvidence` and map to a structured `Failure`. New deterministic checks should feed existing metric dimensions instead of creating parallel scoring semantics.
 
 ## Development workflow
 
@@ -76,45 +98,29 @@ GitHub Actions runs the same quality gate on PRs and integration/stable pushes.
 - External-agent credentials remain ephemeral and must never enter run history, logs or API responses.
 - Prefer typed Pydantic/TypeScript contracts over loosely shaped dictionaries at public boundaries.
 - Prefer deterministic evaluation whenever the rule can be represented structurally.
+- Do not add arbitrary executable expressions or user-authored code to scenario fixtures.
 - Do not add a second scoring system inside storage, UI or regression modules.
 - Persisted payloads must remain readable/validatable through explicit model contracts and migrations.
 - Keep memory and SQL stores behaviorally aligned through shared projections/evaluation logic.
 - Do not introduce Redis, Celery, Kafka or another queue until a real durability/throughput requirement exists.
 - Do not add auth, billing, multi-tenancy or voice merely to make the product look larger.
-- Do not redesign working UI while extracting components; refactor behavior-preservingly first.
+- Keep the refactored `/runs` component boundaries focused as new UI surfaces are added.
 
 ## Immediate roadmap
 
-### 1. Frontend maintainability pass
-
-The `/runs` dashboard has grown large. Extract configuration, recent history, results/detail, regression comparison and polling concerns into focused components/hooks without changing product behavior or visual direction.
-
-### 2. Richer deterministic contracts
-
-Before adding a paid judge, extend structured checks where they materially improve workflow validation. Good candidates:
-
-- tool ordering / preconditions
-- argument existence
-- one-of values
-- regex/pattern constraints
-- numeric min/max constraints
-- structured JSON subset/schema checks
-
-Every new check must produce inspectable evidence and a structured `Failure`, and must remain opt-in/backward-compatible for existing fixtures.
-
-### 3. Version-aware trends
+### 1. Version-aware trends
 
 Use persisted `agent_version` data to expose compact run/version history and reliability movement. Avoid building a general analytics platform; start with version, run score, pass/fail/error counts, severity counts and regression direction.
 
-### 4. Release readiness
+### 2. Release readiness
 
 Answer the product's core question directly: “Is this agent version safe enough to release?” Build the verdict from existing deterministic evidence, orchestration errors, severity and regression state rather than inventing a disconnected score.
 
-### 5. Test suites / second vertical
+### 3. Test suites / second vertical
 
-Compose scenario groups beyond one insurance pack and prove the generic boundary with a small second vertical such as e-commerce or banking. Keep scenario ground truth hand-reviewed.
+Compose scenario groups beyond one insurance pack and prove the generic boundary with a small second vertical such as e-commerce or banking. Keep scenario ground truth hand-reviewed and include at least one domain-specific tool identifier outside the insurance demo enum.
 
-### 6. Semantic judge shadow mode
+### 4. Semantic judge shadow mode
 
 Add LLM-based evaluation only for expectations that cannot be expressed deterministically, such as unsupported promises, intent satisfaction or internal-instruction disclosure. Judge output must be structured, evidence-backed, explicitly marked semantic and initially non-blocking/shadow-mode.
 

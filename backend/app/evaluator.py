@@ -1,3 +1,5 @@
+import math
+import re
 from collections import defaultdict
 from collections.abc import Sequence
 from enum import StrEnum
@@ -6,7 +8,16 @@ from typing import Literal, Protocol
 from pydantic import Field
 
 from app.models import JsonScalar, StrictModel, ToolEvent, ToolName, ToolReference
-from app.scenarios import Scenario, Severity
+from app.scenarios import (
+    ArgumentConstraint,
+    ArgumentExistsConstraint,
+    ArgumentOneOfConstraint,
+    ArgumentPatternConstraint,
+    ArgumentRangeConstraint,
+    Scenario,
+    Severity,
+    ToolOrderConstraint,
+)
 
 
 class EvaluationStatus(StrEnum):
@@ -22,6 +33,11 @@ class EvaluationCheckType(StrEnum):
     FORBIDDEN_PHRASE = "forbidden_phrase"
     REQUIRED_PHRASE = "required_phrase"
     POSSIBLE_LOOP = "possible_loop"
+    TOOL_PRECONDITION = "tool_precondition"
+    TOOL_ARGUMENT_EXISTS = "tool_argument_exists"
+    TOOL_ARGUMENT_ONE_OF = "tool_argument_one_of"
+    TOOL_ARGUMENT_PATTERN = "tool_argument_pattern"
+    TOOL_ARGUMENT_RANGE = "tool_argument_range"
 
 
 class EvaluationCategory(StrEnum):
@@ -32,12 +48,22 @@ class EvaluationCategory(StrEnum):
     FORBIDDEN_PHRASE_DETECTED = "forbidden_phrase_detected"
     REQUIRED_PHRASE_MISSING = "required_phrase_missing"
     POSSIBLE_LOOP_DETECTED = "possible_loop_detected"
+    TOOL_PRECONDITION_VIOLATION = "tool_precondition_violation"
+    TOOL_ARGUMENT_MISSING = "tool_argument_missing"
+    TOOL_ARGUMENT_NOT_ALLOWED = "tool_argument_not_allowed"
+    TOOL_ARGUMENT_PATTERN_MISMATCH = "tool_argument_pattern_mismatch"
+    TOOL_ARGUMENT_RANGE_VIOLATION = "tool_argument_range_violation"
 
 
 class EvaluationEvidence(StrictModel):
     expected_tool: ToolReference | None = None
+    prerequisite_tool: ToolReference | None = None
     argument_name: str | None = None
     expected_value: JsonScalar = None
+    allowed_values: list[JsonScalar] = Field(default_factory=list)
+    pattern: str | None = None
+    min_value: float | None = None
+    max_value: float | None = None
     actual_values: list[JsonScalar] = Field(default_factory=list)
     matching_event: ToolEvent | None = None
     offending_event: ToolEvent | None = None
@@ -81,8 +107,14 @@ def _normalize_for_loop(text: str) -> str:
     return " ".join(text.casefold().split())
 
 
+def _json_scalar_matches(actual: JsonScalar, expected: JsonScalar) -> bool:
+    if isinstance(actual, bool) or isinstance(expected, bool):
+        return type(actual) is type(expected) and actual == expected
+    return actual == expected
+
+
 class DeterministicToolEvaluator:
-    """Evaluate only structured fixture contracts against observed tool events."""
+    """Evaluate structured fixture contracts against observed tool/response evidence."""
 
     def evaluate(
         self,
@@ -142,6 +174,28 @@ class DeterministicToolEvaluator:
                     tool, max_count, events_by_tool[tool], scenario.severity_if_failed, index
                 )
             )
+
+        for index, order_constraint in enumerate(scenario.tool_order_constraints, start=1):
+            checks.append(
+                self._tool_precondition_check(
+                    order_constraint,
+                    tool_trace,
+                    scenario.severity_if_failed,
+                    index,
+                )
+            )
+
+        for index, argument_constraint in enumerate(scenario.argument_constraints, start=1):
+            events = events_by_tool[argument_constraint.tool]
+            if events:
+                checks.append(
+                    self._rich_argument_check(
+                        argument_constraint,
+                        events,
+                        scenario.severity_if_failed,
+                        index,
+                    )
+                )
 
         for index, phrase in enumerate(scenario.forbidden_response_phrases, start=1):
             checks.append(
@@ -316,6 +370,268 @@ class DeterministicToolEvaluator:
             category=EvaluationCategory.EXCESSIVE_TOOL_CALLS,
             severity=failure_severity,
             reason=f"Tool {tool} was called {count} time(s), exceeding the allowed {max_count}.",
+            evidence=evidence,
+        )
+
+    @staticmethod
+    def _tool_precondition_check(
+        constraint: ToolOrderConstraint,
+        tool_trace: list[ToolEvent],
+        failure_severity: Severity,
+        index: int,
+    ) -> EvaluationCheckResult:
+        evidence = EvaluationEvidence(
+            expected_tool=constraint.after,
+            prerequisite_tool=constraint.before,
+            condition=f"{constraint.before} before {constraint.after}",
+        )
+        after_position = next(
+            (
+                (position, event)
+                for position, event in enumerate(tool_trace)
+                if event.tool == constraint.after
+            ),
+            None,
+        )
+        check_id = f"tool_precondition:{index}:{constraint.before}:{constraint.after}"
+        if after_position is None:
+            return EvaluationCheckResult(
+                check_id=check_id,
+                type=EvaluationCheckType.TOOL_PRECONDITION,
+                status=EvaluationStatus.PASS,
+                reason=(
+                    f"Tool {constraint.after} was not called, so its prerequisite "
+                    "was not violated."
+                ),
+                evidence=evidence,
+            )
+
+        position, after_event = after_position
+        prerequisite_event = next(
+            (
+                event
+                for event in reversed(tool_trace[:position])
+                if event.tool == constraint.before
+            ),
+            None,
+        )
+        if prerequisite_event is not None:
+            evidence.matching_event = prerequisite_event
+            return EvaluationCheckResult(
+                check_id=check_id,
+                type=EvaluationCheckType.TOOL_PRECONDITION,
+                status=EvaluationStatus.PASS,
+                reason=f"Tool {constraint.before} occurred before {constraint.after}.",
+                evidence=evidence,
+            )
+
+        evidence.offending_event = after_event
+        return EvaluationCheckResult(
+            check_id=check_id,
+            type=EvaluationCheckType.TOOL_PRECONDITION,
+            status=EvaluationStatus.FAIL,
+            category=EvaluationCategory.TOOL_PRECONDITION_VIOLATION,
+            severity=failure_severity,
+            reason=f"Tool {constraint.after} was called before prerequisite {constraint.before}.",
+            evidence=evidence,
+        )
+
+    @classmethod
+    def _rich_argument_check(
+        cls,
+        constraint: ArgumentConstraint,
+        events: list[ToolEvent],
+        failure_severity: Severity,
+        index: int,
+    ) -> EvaluationCheckResult:
+        if isinstance(constraint, ArgumentExistsConstraint):
+            return cls._argument_exists_check(constraint, events, failure_severity, index)
+        if isinstance(constraint, ArgumentOneOfConstraint):
+            return cls._argument_one_of_check(constraint, events, failure_severity, index)
+        if isinstance(constraint, ArgumentPatternConstraint):
+            return cls._argument_pattern_check(constraint, events, failure_severity, index)
+        return cls._argument_range_check(constraint, events, failure_severity, index)
+
+    @staticmethod
+    def _argument_exists_check(
+        constraint: ArgumentExistsConstraint,
+        events: list[ToolEvent],
+        failure_severity: Severity,
+        index: int,
+    ) -> EvaluationCheckResult:
+        offending = next(
+            (event for event in events if constraint.argument not in event.arguments),
+            None,
+        )
+        evidence = EvaluationEvidence(
+            expected_tool=constraint.tool,
+            argument_name=constraint.argument,
+            actual_values=[event.arguments.get(constraint.argument) for event in events],
+            matching_event=events[0] if offending is None else None,
+            offending_event=offending,
+        )
+        check_id = f"tool_argument_exists:{index}:{constraint.tool}:{constraint.argument}"
+        if offending is None:
+            return EvaluationCheckResult(
+                check_id=check_id,
+                type=EvaluationCheckType.TOOL_ARGUMENT_EXISTS,
+                status=EvaluationStatus.PASS,
+                reason=f"Every {constraint.tool} call included argument {constraint.argument}.",
+                evidence=evidence,
+            )
+        return EvaluationCheckResult(
+            check_id=check_id,
+            type=EvaluationCheckType.TOOL_ARGUMENT_EXISTS,
+            status=EvaluationStatus.FAIL,
+            category=EvaluationCategory.TOOL_ARGUMENT_MISSING,
+            severity=failure_severity,
+            reason=f"A {constraint.tool} call omitted required argument {constraint.argument}.",
+            evidence=evidence,
+        )
+
+    @staticmethod
+    def _argument_one_of_check(
+        constraint: ArgumentOneOfConstraint,
+        events: list[ToolEvent],
+        failure_severity: Severity,
+        index: int,
+    ) -> EvaluationCheckResult:
+        def is_allowed(event: ToolEvent) -> bool:
+            if constraint.argument not in event.arguments:
+                return False
+            actual = event.arguments[constraint.argument]
+            return any(_json_scalar_matches(actual, allowed) for allowed in constraint.values)
+
+        offending = next((event for event in events if not is_allowed(event)), None)
+        evidence = EvaluationEvidence(
+            expected_tool=constraint.tool,
+            argument_name=constraint.argument,
+            allowed_values=list(constraint.values),
+            actual_values=[event.arguments.get(constraint.argument) for event in events],
+            matching_event=events[0] if offending is None else None,
+            offending_event=offending,
+        )
+        check_id = f"tool_argument_one_of:{index}:{constraint.tool}:{constraint.argument}"
+        if offending is None:
+            return EvaluationCheckResult(
+                check_id=check_id,
+                type=EvaluationCheckType.TOOL_ARGUMENT_ONE_OF,
+                status=EvaluationStatus.PASS,
+                reason=f"Every {constraint.tool}.{constraint.argument} value was allowed.",
+                evidence=evidence,
+            )
+        return EvaluationCheckResult(
+            check_id=check_id,
+            type=EvaluationCheckType.TOOL_ARGUMENT_ONE_OF,
+            status=EvaluationStatus.FAIL,
+            category=EvaluationCategory.TOOL_ARGUMENT_NOT_ALLOWED,
+            severity=failure_severity,
+            reason=f"A {constraint.tool}.{constraint.argument} value was outside the allowed set.",
+            evidence=evidence,
+        )
+
+    @staticmethod
+    def _argument_pattern_check(
+        constraint: ArgumentPatternConstraint,
+        events: list[ToolEvent],
+        failure_severity: Severity,
+        index: int,
+    ) -> EvaluationCheckResult:
+        compiled = re.compile(constraint.pattern)
+
+        def matches(event: ToolEvent) -> bool:
+            if constraint.argument not in event.arguments:
+                return False
+            actual = event.arguments[constraint.argument]
+            return (
+                isinstance(actual, str)
+                and len(actual) <= 4_096
+                and compiled.fullmatch(actual) is not None
+            )
+
+        offending = next((event for event in events if not matches(event)), None)
+        evidence = EvaluationEvidence(
+            expected_tool=constraint.tool,
+            argument_name=constraint.argument,
+            pattern=constraint.pattern,
+            actual_values=[event.arguments.get(constraint.argument) for event in events],
+            matching_event=events[0] if offending is None else None,
+            offending_event=offending,
+        )
+        check_id = f"tool_argument_pattern:{index}:{constraint.tool}:{constraint.argument}"
+        if offending is None:
+            return EvaluationCheckResult(
+                check_id=check_id,
+                type=EvaluationCheckType.TOOL_ARGUMENT_PATTERN,
+                status=EvaluationStatus.PASS,
+                reason=(
+                    f"Every {constraint.tool}.{constraint.argument} value matched "
+                    "the required pattern."
+                ),
+                evidence=evidence,
+            )
+        return EvaluationCheckResult(
+            check_id=check_id,
+            type=EvaluationCheckType.TOOL_ARGUMENT_PATTERN,
+            status=EvaluationStatus.FAIL,
+            category=EvaluationCategory.TOOL_ARGUMENT_PATTERN_MISMATCH,
+            severity=failure_severity,
+            reason=(
+                f"A {constraint.tool}.{constraint.argument} value did not match "
+                "the required pattern."
+            ),
+            evidence=evidence,
+        )
+
+    @staticmethod
+    def _argument_range_check(
+        constraint: ArgumentRangeConstraint,
+        events: list[ToolEvent],
+        failure_severity: Severity,
+        index: int,
+    ) -> EvaluationCheckResult:
+        def in_range(event: ToolEvent) -> bool:
+            if constraint.argument not in event.arguments:
+                return False
+            actual = event.arguments[constraint.argument]
+            if isinstance(actual, bool) or not isinstance(actual, (int, float)):
+                return False
+            numeric = float(actual)
+            if not math.isfinite(numeric):
+                return False
+            if constraint.min_value is not None and numeric < constraint.min_value:
+                return False
+            return constraint.max_value is None or numeric <= constraint.max_value
+
+        offending = next((event for event in events if not in_range(event)), None)
+        evidence = EvaluationEvidence(
+            expected_tool=constraint.tool,
+            argument_name=constraint.argument,
+            min_value=constraint.min_value,
+            max_value=constraint.max_value,
+            actual_values=[event.arguments.get(constraint.argument) for event in events],
+            matching_event=events[0] if offending is None else None,
+            offending_event=offending,
+        )
+        check_id = f"tool_argument_range:{index}:{constraint.tool}:{constraint.argument}"
+        if offending is None:
+            return EvaluationCheckResult(
+                check_id=check_id,
+                type=EvaluationCheckType.TOOL_ARGUMENT_RANGE,
+                status=EvaluationStatus.PASS,
+                reason=f"Every {constraint.tool}.{constraint.argument} value was within range.",
+                evidence=evidence,
+            )
+        return EvaluationCheckResult(
+            check_id=check_id,
+            type=EvaluationCheckType.TOOL_ARGUMENT_RANGE,
+            status=EvaluationStatus.FAIL,
+            category=EvaluationCategory.TOOL_ARGUMENT_RANGE_VIOLATION,
+            severity=failure_severity,
+            reason=(
+                f"A {constraint.tool}.{constraint.argument} value was outside "
+                "the required range."
+            ),
             evidence=evidence,
         )
 

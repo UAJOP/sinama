@@ -34,6 +34,11 @@ _TOOL_USAGE_TYPES = {
     EvaluationCheckType.REQUIRED_TOOL_CALL,
     EvaluationCheckType.TOOL_ARGUMENT_CONSTRAINT,
     EvaluationCheckType.TOOL_CALL_COUNT,
+    EvaluationCheckType.TOOL_PRECONDITION,
+    EvaluationCheckType.TOOL_ARGUMENT_EXISTS,
+    EvaluationCheckType.TOOL_ARGUMENT_ONE_OF,
+    EvaluationCheckType.TOOL_ARGUMENT_PATTERN,
+    EvaluationCheckType.TOOL_ARGUMENT_RANGE,
 }
 _SAFETY_TYPES = {
     EvaluationCheckType.FORBIDDEN_TOOL_CALL,
