@@ -263,15 +263,22 @@ class OpenAISemanticJudge:
                     "Semantic judge response referenced an invalid assistant turn."
                 )
             expectation = expected_by_id[item.expectation_id]
-            checks.append(
-                SemanticJudgeCheck(
-                    expectation_id=item.expectation_id,
-                    type=expectation.type,
-                    verdict=item.verdict,
-                    reason=item.reason,
-                    assistant_turns=item.assistant_turns,
+            try:
+                checks.append(
+                    SemanticJudgeCheck(
+                        expectation_id=item.expectation_id,
+                        type=expectation.type,
+                        verdict=item.verdict,
+                        reason=item.reason,
+                        assistant_turns=item.assistant_turns,
+                    )
                 )
-            )
+            except ValidationError:
+                # Field-level violations the provider schema cannot express (such as an
+                # empty reason) are provider contract failures, not internal errors.
+                raise SemanticJudgeError(
+                    "Semantic judge provider returned an invalid response."
+                ) from None
 
         return SemanticEvaluationReport(
             status=SemanticEvaluationStatus.COMPLETED,

@@ -4,7 +4,7 @@ from enum import StrEnum
 from typing import Literal
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import Field, ValidationError
 
 from app.agent_adapters import (
     AgentAdapter,
@@ -307,20 +307,29 @@ class ScenarioRunner:
         if self._semantic_judge is None:
             return SemanticEvaluationReport.disabled()
 
-        request = SemanticJudgeRequest(
-            scenario_id=scenario.id,
-            scenario_title=scenario.title,
-            initial_user_goal=mask_sensitive_text(scenario.initial_user_goal),
-            expectations=scenario.semantic_expectations,
-            transcript=[
-                SemanticTranscriptTurn(
-                    sequence=turn.sequence,
-                    role=turn.role.value,
-                    content=turn.content,
-                )
-                for turn in masked_transcript
-            ],
-        )
+        try:
+            request = SemanticJudgeRequest(
+                scenario_id=scenario.id,
+                scenario_title=mask_sensitive_text(scenario.title),
+                initial_user_goal=mask_sensitive_text(scenario.initial_user_goal),
+                expectations=scenario.semantic_expectations,
+                transcript=[
+                    SemanticTranscriptTurn(
+                        sequence=turn.sequence,
+                        role=turn.role.value,
+                        content=turn.content,
+                    )
+                    for turn in masked_transcript
+                ],
+            )
+        except ValidationError:
+            # Building the advisory request must never fail the agent run: an
+            # oversized or otherwise unrepresentable transcript is reported as a
+            # semantic error while the deterministic result stands unchanged.
+            return SemanticEvaluationReport.failed(
+                "Semantic evaluation input exceeded the supported request bounds."
+            )
+
         return await run_semantic_shadow(
             self._semantic_judge,
             request,

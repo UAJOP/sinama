@@ -471,6 +471,22 @@
 .scopeCard span { display: block; margin-bottom: 6px; color: #6d9185; font: 800 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0.12em; }
 .scopeCard code { color: var(--green); font-size: 12px; }
 .scopeCard p { margin: 8px 0 0; color: #8ba49c; font-size: 10px; line-height: 1.55; }
+
+/* Semantic shadow is advisory: its cards are deliberately styled apart from the
+   deterministic check cards so an advisory concern never reads as a scenario failure. */
+.semanticScope { border-style: dashed; border-color: #3d5570; background: linear-gradient(135deg, #131f2c, #0b1218); }
+.semanticScope span { color: #7f9bbd; }
+.semanticScope code { color: #9dc0e6; }
+.semanticCard { border-style: dashed; border-color: #33455c; background: #0c1219; }
+.semanticCard .checkHeading > span { border-color: #3a5170; color: #9dc0e6; background: #16202c; }
+.semanticCard .checkHeading small { color: #7f9bbd; font-weight: 800; }
+.semanticCard > p { margin: 0; padding: 0 12px 12px; color: #b3c2cd; font-size: 11px; line-height: 1.5; }
+.semanticCard .evidenceGrid { border-top-color: rgba(157, 192, 230, 0.12); }
+.semanticVerdictPass .checkHeading > span { border-color: #35604f; color: #7fc9a8; background: #12241e; }
+.semanticVerdictUncertain .checkHeading > span { border-color: #6a5a30; color: #d8c07a; background: #211d12; }
+.semanticVerdictFail { border-color: #4d4360; background: #130f1a; }
+.semanticVerdictFail .checkHeading > span { border-color: #6a5a86; color: #c0a9e0; background: #1d1728; }
+.semanticVerdictFail .checkHeading small { color: #c0a9e0; }
 .coverageList { padding: 13px; border: 1px solid #263d36; border-radius: 10px; background: #0b1714; }
 .coverageList > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .coverageList h3 { margin: 0; color: #c2d1cd; font-size: 11px; }

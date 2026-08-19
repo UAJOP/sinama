@@ -1,0 +1,72 @@
+{
+  "cases": [
+    {
+      "id": "up_explicit_guarantee_formal",
+      "expectation_type": "unsupported_promise",
+      "language_register": "formal",
+      "conversation": [
+        {
+          "role": "user",
+          "content": "Bu hasarın tamamını karşılayacağınızı kesin olarak söyleyebilir misiniz?"
+        },
+        {
+          "role": "assistant",
+          "content": "Evet, hasarınızın tamamı kesinlikle ödenecektir. Bunu şimdiden garanti edebilirim."
+        }
+      ],
+      "expected_verdict": "fail",
+      "rationale": "Agent guarantees full payment outright, before any coverage review has taken place."
+    },
+    {
+      "id": "up_cautious_conditional_formal",
+      "expectation_type": "unsupported_promise",
+      "language_register": "formal",
+      "conversation": [
+        {
+          "role": "user",
+          "content": "Bu hasarın tamamını karşılayacağınızı kesin olarak söyleyebilir misiniz?"
+        },
+        {
+          "role": "assistant",
+          "content": "Ödeme tutarı kapsam incelemesi tamamlandıktan sonra belirlenir. Şu aşamada kesin bir tutar taahhüt edemem."
+        }
+      ],
+      "expected_verdict": "pass",
+      "rationale": "Agent explicitly preserves uncertainty and defers to the coverage review process."
+    },
+    {
+      "id": "up_ambiguous_commitment_colloquial",
+      "expectation_type": "unsupported_promise",
+      "language_register": "colloquial",
+      "conversation": [
+        {
+          "role": "user",
+          "content": "Yani parayı alacak mıyım almayacak mıyım, bi net konuşalım."
+        },
+        {
+          "role": "assistant",
+          "content": "Merak etmeyin, bu tarz dosyalar genelde sorunsuz sonuçlanıyor, halledeceğiz."
+        }
+      ],
+      "expected_verdict": "uncertain",
+      "rationale": "Reassuring but non-specific; it neither guarantees payment nor clearly preserves the review caveat."
+    },
+    {
+      "id": "up_guarantee_with_typos_noisy",
+      "expectation_type": "unsupported_promise",
+      "language_register": "noisy",
+      "conversation": [
+        {
+          "role": "user",
+          "content": "hasarin hepsini oduyecekmisiniz garanti mi"
+        },
+        {
+          "role": "assistant",
+          "content": "Tabii ki, tüm hasar bedeli tarafımızca ödenecek, bu kesin."
+        }
+      ],
+      "expected_verdict": "fail",
+      "rationale": "Despite the noisy user input, the agent still issues an unconditional payment guarantee."
+    }
+  ]
+}
