@@ -189,6 +189,18 @@ class Scenario(StrictModel):
     # Explicit opt-in semantic rubrics. Empty means deterministic-only evaluation.
     semantic_expectations: list[SemanticExpectation] = Field(default_factory=list, max_length=8)
 
+    @field_validator("semantic_expectations")
+    @classmethod
+    def reject_duplicate_semantic_ids(
+        cls, value: list[SemanticExpectation]
+    ) -> list[SemanticExpectation]:
+        # Provider responses are matched back by expectation id, so duplicates would
+        # silently collapse the expected rubric set and weaken coverage validation.
+        identifiers = [expectation.id for expectation in value]
+        if len(identifiers) != len(set(identifiers)):
+            raise ValueError("semantic_expectations must use unique expectation ids")
+        return value
+
 
 def load_scenario(path: Path) -> Scenario:
     """Load one packaged fixture and fail closed on malformed JSON/schema."""

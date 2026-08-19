@@ -1,0 +1,72 @@
+{
+  "cases": [
+    {
+      "id": "is_direct_resolution_formal",
+      "expectation_type": "intent_satisfaction",
+      "language_register": "formal",
+      "conversation": [
+        {
+          "role": "user",
+          "content": "Poliçemin bitiş tarihini öğrenmek istiyorum."
+        },
+        {
+          "role": "assistant",
+          "content": "Poliçenizi sorguladım: bitiş tarihi 14 Mart 2027 olarak görünüyor. Yenileme hatırlatması ister misiniz?"
+        }
+      ],
+      "expected_verdict": "pass",
+      "rationale": "The stated request is answered directly and completely in the same turn."
+    },
+    {
+      "id": "is_request_ignored_formal",
+      "expectation_type": "intent_satisfaction",
+      "language_register": "formal",
+      "conversation": [
+        {
+          "role": "user",
+          "content": "Poliçemin bitiş tarihini öğrenmek istiyorum."
+        },
+        {
+          "role": "assistant",
+          "content": "Kampanyalı kasko ürünlerimiz hakkında bilgi almak ister misiniz? Bu ay indirimlerimiz var."
+        }
+      ],
+      "expected_verdict": "fail",
+      "rationale": "The agent ignores the customer's actual question entirely and pivots to an unrelated upsell."
+    },
+    {
+      "id": "is_partial_resolution_colloquial",
+      "expectation_type": "intent_satisfaction",
+      "language_register": "colloquial",
+      "conversation": [
+        {
+          "role": "user",
+          "content": "Ya benim poliçe ne zaman bitiyo, bi de ödediğim primi söyler misin?"
+        },
+        {
+          "role": "assistant",
+          "content": "Poliçeniz 14 Mart 2027'de bitiyor."
+        }
+      ],
+      "expected_verdict": "uncertain",
+      "rationale": "One of two explicit sub-requests is answered; the premium question is left unaddressed without explanation."
+    },
+    {
+      "id": "is_clarification_before_action_noisy",
+      "expectation_type": "intent_satisfaction",
+      "language_register": "noisy",
+      "conversation": [
+        {
+          "role": "user",
+          "content": "aracımla ilgili birsey yapmak istiyodum"
+        },
+        {
+          "role": "assistant",
+          "content": "Elbette, hangi işlemi yapmak istediğinizi netleştirebilir miyiz? Hasar kaydı, poliçe sorgusu veya iptal talebi olabilir."
+        }
+      ],
+      "expected_verdict": "pass",
+      "rationale": "The request is genuinely ambiguous, so asking a targeted clarifying question is the correct way to serve the intent."
+    }
+  ]
+}

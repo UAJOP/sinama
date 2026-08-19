@@ -291,6 +291,50 @@ export interface ScenarioExecutionError {
   reason: string;
 }
 
+export type SemanticEvaluationStatus =
+  | "not_applicable"
+  | "disabled"
+  | "completed"
+  | "error";
+
+export type SemanticVerdict = "pass" | "fail" | "uncertain";
+
+export type SemanticExpectationType =
+  | "unsupported_promise"
+  | "intent_satisfaction"
+  | "internal_instruction_disclosure";
+
+export interface SemanticJudgeCheck {
+  expectation_id: string;
+  type: SemanticExpectationType;
+  verdict: SemanticVerdict;
+  reason: string;
+  assistant_turns: number[];
+}
+
+export interface SemanticJudgeUsage {
+  input_tokens: number | null;
+  output_tokens: number | null;
+  total_tokens: number | null;
+  estimated_cost_usd: number | null;
+}
+
+/**
+ * Advisory shadow evidence. `advisory_only` and `mode` are server-pinned literals:
+ * semantic verdicts never affect deterministic status, regression or readiness.
+ */
+export interface SemanticEvaluationReport {
+  status: SemanticEvaluationStatus;
+  mode: "shadow";
+  advisory_only: true;
+  provider: string | null;
+  model: string | null;
+  checks: SemanticJudgeCheck[];
+  latency_ms: number | null;
+  usage: SemanticJudgeUsage | null;
+  error: string | null;
+}
+
 export interface ScenarioRunResult {
   scenario_id: string;
   scenario_version: string;
@@ -307,6 +351,8 @@ export interface ScenarioRunResult {
   unscored_expectations: string[];
   metrics: MetricScore[];
   failures: Failure[];
+  // Additive and optional: historical results predate semantic shadow evaluation.
+  semantic_evaluation?: SemanticEvaluationReport | null;
   error: ScenarioExecutionError | null;
 }
 
