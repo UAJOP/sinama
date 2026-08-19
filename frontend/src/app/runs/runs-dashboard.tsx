@@ -30,6 +30,7 @@ import {
   RegressionView,
 } from "./run-regression";
 import { ResultDetail, ResultList } from "./run-results";
+import { RunTrends } from "./run-trends";
 import styles from "./runs.module.css";
 import {
   RECENT_RUNS_LIMIT,
@@ -484,6 +485,8 @@ export function RunsDashboard() {
           setRecentRunsReload((value) => value + 1);
         }}
       />
+
+      <RunTrends packId={selectedPackId} reloadKey={recentRunsReload} />
 
       {runError && (
         <div className={styles.errorBanner} role="alert">

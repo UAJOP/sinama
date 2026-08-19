@@ -53,6 +53,7 @@ The question that matters for a production support agent is not “does the chat
 5. Evaluate deterministic behavioral contracts against the observed trace/responses.
 6. Inspect failure evidence — the exact check, event, prerequisite or argument violation.
 7. Compare the run against a baseline or another compatible agent version.
+8. Track reliability movement across version-tagged runs.
 
 ```text
 Agent Target
@@ -68,6 +69,8 @@ Deterministic Evaluation
 Metrics + Structured Failures
      ↓
 Baseline / Run Comparison
+     ↓
+Version Reliability Trend
 ```
 
 ![Test Runs configuration screen: scenario pack, agent target, healthy/broken mode](docs/assets/readme/sinama-runs-flow.webp)
@@ -125,6 +128,18 @@ This foundation makes a second vertical possible without turning every new domai
 - tag a run with optional `agent_version` metadata (`v1.4`, `prod-2026-08-17`, `claude-sonnet-4.5`)
 - compare any two compatible completed runs directly, reference → current, without changing baseline assignment
 
+### Version-aware reliability trends
+
+- `GET /api/scenario-packs/{pack_id}/trends` exposes recent terminal runs for one pack in chronological order
+- each trend point includes agent/version identity, deterministic run score, pass/fail/error counts, critical/high/medium/low scenario-severity counts and baseline state
+- direction uses the same Goal Completion score, ±5 regression threshold and new-critical override as normal run comparison; no parallel scoring system exists
+- execution-error runs remain visible with `score: null` and do not become comparison references
+- unversioned runs remain explicitly `agent_version: null` and are shown as `Unversioned` rather than being grouped into a fake version
+- PostgreSQL stores only small queryable trend metadata beside the canonical result payload; trend listing does not deserialize transcripts/check evidence merely to render history
+- Alembic revision `0004` backfills existing persisted results once so historical runs participate in trends
+- memory mode uses its already-bounded in-process result objects and needs no database
+- the `/runs` dashboard renders a lightweight responsive trend table/score rail without adding a charting dependency
+
 ### Run history
 
 - two storage backends behind one interface: a bounded in-memory store and a PostgreSQL store for durable deployments
@@ -164,9 +179,9 @@ Deterministic Demo Agent      Async Scenario Runner
 Run history is selected with `SINAMA_RUN_STORE_BACKEND`:
 
 - `memory` (default) keeps recent terminal runs in process. Nothing survives a restart and no database is required.
-- `postgres` persists runs, full scenario results and baseline assignment to standard PostgreSQL. Supabase works through its PostgreSQL connection string; SINAMA does not depend on Supabase-specific APIs.
+- `postgres` persists runs, full scenario results, queryable trend metadata and baseline assignment to standard PostgreSQL. Supabase works through its PostgreSQL connection string; SINAMA does not depend on Supabase-specific APIs.
 
-Both backends render the same API models through shared projection helpers, and regression scoring is owned by evaluator/regression modules rather than storage. Persisted payloads are validated back through typed Pydantic models on read.
+Both backends render the same API models through shared projection helpers, and regression/trend direction is owned by evaluator/regression modules rather than storage. Persisted payloads are validated back through typed Pydantic models on read.
 
 See [Technical architecture](docs/ARCHITECTURE.md) for the detailed domain/storage boundaries.
 
@@ -240,6 +255,7 @@ Run lifecycle (`queued`, `running`, `completed`, `error`) describes orchestratio
 Run API:
 
 - `GET /api/scenario-packs`
+- `GET /api/scenario-packs/{pack_id}/trends?limit=20`
 - `POST /api/agents/external/test-connection`
 - `POST /api/runs`
 - `GET /api/runs?limit=20`
@@ -325,7 +341,6 @@ GitHub Actions runs the same quality gate on pull requests and integration/stabl
 - the default `memory` backend is bounded and ephemeral
 - playground conversations are always in memory
 - interrupted persisted runs cannot resume because there is no durable worker queue; they are retired to `error` after restart
-- `agent_version` is descriptive metadata only; version trend rollups are not implemented yet
 - no semantic/LLM judge; semantic expectations remain explicitly unscored
 - no run deletion/archive browsing UI
 - no saved agent connections
@@ -337,10 +352,9 @@ GitHub Actions runs the same quality gate on pull requests and integration/stabl
 
 ## Next
 
-1. version-aware trends from persisted `agent_version` runs
-2. evidence-backed release-readiness verdict
-3. test-suite composition and a second vertical pack
-4. semantic/LLM judge in explicit shadow mode for genuinely semantic expectations
+1. evidence-backed release-readiness verdict
+2. test-suite composition and a second vertical pack
+3. semantic/LLM judge in explicit shadow mode for genuinely semantic expectations
 
 ## Documentation
 
