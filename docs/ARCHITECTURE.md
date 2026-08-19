@@ -41,6 +41,8 @@ Responsibilities:
 
 The frontend must not contain provider secrets or privileged database keys.
 
+The `/runs` experience is split into focused components for configuration, recent history/overview, scenario evidence and regression comparison, with active-run polling isolated in a dedicated hook. `runs-dashboard.tsx` remains the state/orchestration coordinator instead of owning every render concern. This keeps future trends/readiness/suite surfaces additive without changing the existing visual direction or API boundary.
+
 ## Backend
 
 FastAPI owns all privileged operations:
@@ -80,8 +82,15 @@ The implemented evaluation scope is `deterministic_tool_contract`:
 - required/forbidden response phrases
 - repeated-response loop detection
 - explicit handoff tool/argument contracts
+- conditional tool prerequisites/order (`A` must occur before `B` when `B` is observed)
+- required argument existence on observed tool calls
+- one-of allowed argument values
+- regex full-match argument rules
+- inclusive numeric min/max argument ranges
 
-Argument constraints run only when the corresponding tool event exists. A missing required tool emits one missing-tool failure without cascading argument mismatches; a missing optional tool emits no check.
+Rich workflow constraints are typed and opt-in. A tool-order rule records the earliest offending `after` event when its prerequisite has not previously occurred. If the `after` tool is never called, the conditional rule is not violated. Rich argument rules validate every observed call of their target tool and retain the first offending event; they do not create a synthetic failure when an optional tool is absent. Required-tool checks continue to own tool absence.
+
+Every new deterministic violation maps to a structured `Failure` and machine-readable `EvaluationEvidence`. Tool preconditions and argument constraints contribute to the existing Tool Usage metric rather than creating a parallel score.
 
 Fixture `deterministic_checks` IDs are declarative descriptions, not evaluator instructions. They are copied to `declared_checks` and `unscored_declared_checks`; the engine neither parses their names nor infers that an ID was executed. Actual coverage is represented only by generated checks. Natural-language outcomes and forbidden behaviors are surfaced as `unscored_expectations` metadata.
 
@@ -98,8 +107,6 @@ Run lifecycle (`queued`, `running`, `completed`, `error`) is independent of scen
 Runs may carry optional user-supplied `agent_version` metadata. Any completed run can become a pack baseline, and compatible completed runs can also be compared explicitly without changing the baseline assignment. Comparison output includes run-level score delta, per-metric deltas and New / Resolved / Persistent failure sets.
 
 External endpoint/token configuration is captured only by the active task factory. The store persists only non-secret target/label/version metadata; bearer tokens are never written to run history.
-
-The Next.js `/runs` route currently owns configuration, polling, recent history, result inspection and comparison views. Its behavior is correct but the dashboard has grown large enough that future trends/suites/readiness work should first extract focused components/hooks rather than keep extending one client component.
 
 ## Core domain objects
 
@@ -127,6 +134,8 @@ Saved agent configurations are roadmap work. Secrets must be referenced from ser
 - scripted user turns
 - expected/forbidden tool contracts
 - response phrase / loop constraints
+- typed tool-order/precondition rules
+- typed argument existence / one-of / regex / numeric-range rules
 - expected and forbidden behaviors
 - severity if failed
 
@@ -159,11 +168,13 @@ Use deterministic checks first:
 - forbidden tool was not called
 - exact required parameter/value is present
 - a tool is not called more than an allowed count
+- required workflow prerequisite occurred before a later action
+- observed tool arguments exist, belong to an approved set, match a required format or stay within numeric bounds
 - handoff occurred when required
 - exact response phrases are present/absent where the rule is deterministic
 - the conversation is not stuck in a repeated-response loop
 
-The next deterministic layer should add richer structured rules such as ordering/preconditions, existence, one-of, regex and numeric constraints before relying on a paid judge.
+Do not add a general expression language or user-authored executable fixture code. Prefer small typed rules that can emit inspectable evidence and deterministic failures.
 
 Use semantic evaluation only for judgments such as:
 
@@ -243,12 +254,10 @@ The CI definition is the source of truth for quality status; documentation shoul
 
 ## Next architecture steps
 
-1. extract the oversized `/runs` dashboard into focused components/hooks without redesigning it
-2. add richer deterministic argument/order/precondition rules
-3. expose version-aware trend rollups from persisted runs
-4. compute an evidence-backed release-readiness verdict
-5. add multi-pack/test-suite composition and a second vertical pack
-6. add a semantic judge in shadow mode for genuinely semantic expectations
+1. expose version-aware trend rollups from persisted runs
+2. compute an evidence-backed release-readiness verdict
+3. add multi-pack/test-suite composition and a second vertical pack
+4. add a semantic judge in shadow mode for genuinely semantic expectations
 
 ## Later, not now
 
