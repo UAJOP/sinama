@@ -47,14 +47,18 @@ from app.test_runs import (
     run_service,
     run_store,
 )
+from app.trends import (
+    RunTrendResponse,
+    TrendStore,
+    build_run_trends,
+    trend_input_from_results,
+)
 
 logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
 def _harden_persistent_database() -> int:
-    """Apply idempotent database security hardening before serving requests."""
-
     if not settings.uses_persistent_run_store:
         return 0
 
@@ -67,15 +71,10 @@ def _harden_persistent_database() -> int:
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
-    # Keep persistence tables inaccessible through accidental public/Data API
-    # paths even when a platform-side advisor or migration step was missed.
     hardened = await asyncio.to_thread(_harden_persistent_database)
     if hardened:
         logger.info("Verified Row Level Security on %s persistence table(s).", hardened)
 
-    # A persisted queued/running run cannot resume without a durable worker
-    # queue, so retire anything a previous process left mid-flight instead of
-    # leaving permanently "running" zombie records behind.
     recovered = await asyncio.to_thread(run_store.recover_interrupted_runs)
     if recovered:
         logger.warning("Marked %s interrupted test run(s) as errored after restart.", recovered)
@@ -195,6 +194,55 @@ def list_scenario_packs() -> list[ScenarioPackSummary]:
     return scenario_pack_registry.list_packs()
 
 
+def _memory_run_trends(pack_id: str, limit: int) -> RunTrendResponse:
+    summaries = [
+        run
+        for run in run_store.list_runs(100)
+        if run.pack_id == pack_id and run.lifecycle_status in {"completed", "error"}
+    ][:limit]
+    inputs = []
+    for summary in summaries:
+        result_summaries = run_store.get_results(summary.run_id).results
+        full_results = [
+            run_store.get_result(summary.run_id, result.scenario_id)
+            for result in result_summaries
+        ]
+        inputs.append(
+            trend_input_from_results(
+                run_id=summary.run_id,
+                pack_id=summary.pack_id,
+                agent_label=summary.agent_label,
+                agent_version=summary.agent_version,
+                lifecycle_status=(
+                    "completed" if summary.lifecycle_status == "completed" else "error"
+                ),
+                created_at=summary.created_at.isoformat(),
+                is_baseline=summary.is_baseline,
+                results=full_results,
+            )
+        )
+    return build_run_trends(pack_id, inputs)
+
+
+@app.get(
+    "/api/scenario-packs/{pack_id}/trends",
+    response_model=RunTrendResponse,
+    tags=["test-runs"],
+)
+def get_run_trends(
+    pack_id: str,
+    limit: int = Query(default=20, ge=1, le=100),
+) -> RunTrendResponse:
+    try:
+        scenario_pack_registry.get_pack(pack_id)
+    except ScenarioPackNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Scenario pack not found") from error
+
+    if isinstance(run_store, TrendStore):
+        return run_store.list_trends(pack_id, limit)
+    return _memory_run_trends(pack_id, limit)
+
+
 @app.post(
     "/api/runs",
     response_model=TestRunSummary,
@@ -224,12 +272,6 @@ async def create_test_run(request: CreateTestRunRequest) -> TestRunSummary:
 def list_test_runs(
     limit: int = Query(default=20, ge=1, le=100),
 ) -> list[TestRunSummary]:
-    """Recent run history, newest first.
-
-    Bounded by design: this is the "reopen a recent run" surface, not an archive
-    browser. Older runs remain persisted and reachable by id.
-    """
-
     return run_store.list_runs(limit)
 
 
@@ -306,12 +348,6 @@ def compare_test_runs(
     current_run_id: UUID,
     reference_run_id: UUID,
 ) -> ExplicitRunComparisonResponse:
-    """Compare two explicitly chosen completed runs: reference -> current.
-
-    Computed on demand and never persisted. Independent of the pack baseline:
-    this neither reads baseline state for scoring nor reassigns it.
-    """
-
     try:
         return run_store.compare_runs(reference_run_id, current_run_id)
     except TestRunNotFoundError as error:
