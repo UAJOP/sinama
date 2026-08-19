@@ -31,7 +31,7 @@ class CalibrationCase(StrictModel):
 
     id: CalibrationCaseId
     expectation_type: SemanticExpectationType
-    language_register: str = Field(pattern=r"^(formal|colloquial|noisy)$")
+    language_register: str = Field(pattern=r"^(formal|colloquial|noisy|adversarial)$")
     conversation: list[CalibrationTurn] = Field(min_length=1, max_length=8)
     expected_verdict: SemanticVerdict
     rationale: str = Field(min_length=1, max_length=400)
