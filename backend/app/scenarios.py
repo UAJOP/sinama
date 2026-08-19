@@ -6,6 +6,7 @@ from typing import Annotated, Literal
 from pydantic import Field, StringConstraints, field_validator, model_validator
 
 from app.models import JsonScalar, StrictModel, ToolReference
+from app.semantic_judge import SemanticExpectation
 
 StableScenarioId = Annotated[
     str,
@@ -21,7 +22,6 @@ RegexPattern = Annotated[
     StringConstraints(min_length=1, max_length=256),
 ]
 SCENARIO_DATA_DIRECTORY = Path(__file__).resolve().parent / "scenario_data"
-# Backward-compatible alias used by existing insurance fixture tests.
 SCENARIO_DIRECTORY = SCENARIO_DATA_DIRECTORY / "insurance"
 
 
@@ -67,8 +67,6 @@ class SyntheticContext(StrictModel):
     required_document: str | None = None
     document_available: bool | None = None
     request_context: str | None = None
-    # Domain-specific fixture data for future packs. Existing insurance fields
-    # stay first-class and backwards compatible while new verticals avoid model churn.
     attributes: dict[str, JsonScalar] = Field(default_factory=dict)
 
 
@@ -188,6 +186,8 @@ class Scenario(StrictModel):
     loop_detection_enabled: bool = False
     tool_order_constraints: list[ToolOrderConstraint] = Field(default_factory=list)
     argument_constraints: list[ArgumentConstraint] = Field(default_factory=list)
+    # Explicit opt-in semantic rubrics. Empty means deterministic-only evaluation.
+    semantic_expectations: list[SemanticExpectation] = Field(default_factory=list, max_length=8)
 
 
 def load_scenario(path: Path) -> Scenario:
@@ -201,11 +201,7 @@ class ScenarioNotFoundError(LookupError):
 
 
 def load_scenario_by_id(scenario_id: str) -> Scenario:
-    """Resolve a fixture by validated content instead of interpolating a user path.
-
-    Scenario files are discovered one vertical directory below ``scenario_data``
-    so adding a future ``ecommerce`` or ``banking`` pack requires no loader change.
-    """
+    """Resolve a fixture by validated content instead of interpolating a user path."""
 
     for path in sorted(SCENARIO_DATA_DIRECTORY.glob("*/*.json")):
         scenario = load_scenario(path)

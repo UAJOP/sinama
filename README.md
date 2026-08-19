@@ -1,6 +1,6 @@
 # SINAMA — AI Agent Reliability Lab
 
-A Turkish-first reliability lab for testing customer-service AI agents before production through repeatable multi-turn scenarios, deterministic tool-call evaluation and inspectable regression evidence.
+A Turkish-first reliability lab for testing customer-service AI agents before production through repeatable multi-turn scenarios, deterministic workflow evaluation and inspectable release evidence.
 
 ![Status: Live MVP](https://img.shields.io/badge/status-live%20MVP-58efaf) ![CI](https://github.com/UAJOP/sinama/actions/workflows/ci.yml/badge.svg) ![Next.js](https://img.shields.io/badge/frontend-Next.js-000000) ![FastAPI](https://img.shields.io/badge/backend-FastAPI-009688) ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB) ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 
@@ -8,180 +8,172 @@ A Turkish-first reliability lab for testing customer-service AI agents before pr
 
 ![SINAMA](docs/assets/readme/sinama-case-study-hero.webp)
 
-SINAMA executes hand-reviewed Turkish multi-turn scenarios against customer-service AI agents, captures transcripts and structured tool traces, deterministically evaluates workflow contracts, compares versions and surfaces evidence-backed release readiness.
+SINAMA executes hand-reviewed Turkish multi-turn scenarios against customer-service AI agents, captures transcripts and structured tool traces, deterministically evaluates workflow contracts, compares versions, tracks regressions and produces evidence-backed release-readiness verdicts.
 
-The product now proves the same core runner/evaluator/store stack across two domains: a ten-scenario insurance pack and a four-scenario e-commerce pack. Cross-vertical test suites compose those packs without adding domain-specific scoring branches.
+The same core runner/evaluator/store stack now spans two domains — insurance and e-commerce — plus a typed cross-vertical suite. An optional semantic judge can add advisory evidence for genuinely semantic expectations without replacing deterministic ground truth.
+
+## Why SINAMA exists
+
+A support agent can sound fluent while still:
+
+- calling the wrong tool,
+- calling a valid tool too early,
+- skipping a prerequisite,
+- sending malformed/out-of-policy arguments,
+- duplicating a side effect,
+- failing to hand off correctly,
+- making an unsupported promise, or
+- exposing internal instructions.
+
+The production question is not “does the chatbot answer?” It is **“does this agent version behave reliably enough to release?”**
+
+SINAMA answers that question with repeatable scenarios, typed evidence and explicit policy instead of treating fluent text as proof of correctness.
 
 ## Reliability proof
 
-The built-in `Insurance Reliability Pack v1` ships with an intentionally broken agent mode alongside the healthy one, so the evaluator has a stable, reproducible regression to catch:
+The built-in insurance demo includes an intentionally broken mode so the evaluator has a stable regression to catch:
 
 | Agent mode                   | Total | Pass | Fail | Error |
 | ---------------------------- | ----: | ---: | ---: | ----: |
 | Healthy                      |    10 |   10 |    0 |     0 |
 | Broken: Premature Submission |    10 |    5 |    5 |     0 |
 
-`INS-001`, `INS-005`, `INS-006` and `INS-008` fail at **HIGH** severity, and `INS-009` fails at **MEDIUM** severity in Broken mode — all five for the same underlying regression: premature `submit_claim` before the required `damage_photo` exists.
+The broken agent still executes normally. SINAMA fails the behavior because `submit_claim` appears before the required `damage_photo` exists.
 
-![Test run results list showing a mix of pass and fail scenarios with severity and failed-check counts](docs/assets/readme/sinama-runs-broken.webp)
+![Broken run result list](docs/assets/readme/sinama-runs-broken.webp)
 
-The agent does not crash and the run does not error — execution completes normally. What fails is the behavior: SINAMA's deterministic evaluator inspects the observed Tool Trace, detects the forbidden `submit_claim` call for that scenario, and reports the policy violation with the offending event as evidence.
+![Tool Trace evidence](docs/assets/readme/sinama-regression-evidence.webp)
 
-![Tool Trace showing submit_claim called with status premature and missing_requirement damage_photo](docs/assets/readme/sinama-regression-evidence.webp)
+That distinction — **successful execution but unsafe behavior** — is the core reliability problem SINAMA is built to expose.
 
-That distinction — a successfully executing agent that is nonetheless behaving incorrectly — is the core thing SINAMA is built to catch.
+## Current product
 
-## The problem
+### Scenario collections
 
-A customer-service agent can sound conversationally correct while still:
+`insurance-v1`
 
-- calling the wrong tool,
-- calling the correct tool too early,
-- skipping a required step,
-- passing malformed or out-of-policy tool arguments,
-- failing to hand off correctly,
-- duplicating side effects, or
-- violating a workflow contract.
+- 10 hand-reviewed Turkish insurance scenarios
+- built-in deterministic demo or external HTTP agent
+- tool policy, safety/privacy, handoff, prompt-injection pressure, context retention, ambiguous intent, Turkish noise, repeated requests and failed-tool recovery
 
-The question that matters for a production support agent is not “does the chatbot answer?” — it is “does the agent behave correctly across a multi-turn workflow?” SINAMA answers that question with explicit evidence rather than treating fluent text as proof of correctness.
+`ecommerce-v1`
 
-## How SINAMA works
+- 4 hand-reviewed Turkish e-commerce scenarios
+- external HTTP agent only
+- refund ordering, failed lookup recovery, high-value damaged-item escalation and duplicate-refund prevention
+- proves generic tool identifiers such as `lookup_order`, `refund_order` and `escalate_return_case` without extending the insurance demo enum
 
-1. Select a test collection — an individual scenario pack or a composed suite.
-2. Select a compatible agent target — built-in demo or external HTTPS endpoint.
-3. Run multi-turn conversations against the target.
-4. Capture transcript and structured Tool Trace.
-5. Evaluate deterministic behavioral contracts against observed trace/responses.
-6. Inspect failure evidence — the exact check, event, prerequisite or argument violation.
-7. Compare the run against a baseline or another compatible agent version.
-8. Track reliability movement across version-tagged runs.
-9. Read a deterministic release-readiness verdict derived from the same evidence.
+`customer-service-core-v1`
 
-```text
-Agent Target
-     ↓
-Pack / Suite
-     ↓
-Multi-turn Execution
-     ↓
-Transcript + Tool Trace
-     ↓
-Deterministic Evaluation
-     ↓
-Metrics + Structured Failures
-     ↓
-Baseline / Run Comparison
-     ↓
-Version Reliability Trend
-     ↓
-Release Readiness Verdict
-```
-
-![Test Runs configuration screen](docs/assets/readme/sinama-runs-flow.webp)
-
-## Current MVP
-
-### Built-in Demo Agent
-
-- deterministic, LLM-free insurance test target
-- `Healthy` mode and `Broken: Premature Claim Submission` mode
-- reproducible without external APIs, an LLM key or a database
-- intentionally remains insurance-only instead of hiding domain switching in core code
-
-### External HTTP Agent
-
-- bring a compatible HTTPS turn endpoint
-- test the connection before running a collection
-- accept validated custom tool identifiers instead of forcing external agents into the insurance demo enum
-- run insurance, e-commerce or cross-vertical suites through the same evidence pipeline
-- inspect the same checks, transcript, tool trace, trends and readiness views
-
-### Insurance Reliability Pack v1
-
-- ten synthetic Turkish insurance scenarios (`INS-001`–`INS-010`)
-- covers tool policy, safety/privacy constraints, handoff, prompt-injection pressure, context retention, ambiguous intent, Turkish typo/noise robustness, repeated requests and failed-tool recovery
-- available against the built-in demo or an external HTTP agent
-
-### E-commerce Reliability Pack v1
-
-- four hand-reviewed Turkish scenarios (`ECOM-001`–`ECOM-004`)
-- proves the generic platform boundary with domain tools such as `lookup_order`, `refund_order` and `escalate_return_case`
-- covers refund ordering, failed-order-lookup recovery, high-value damaged-item escalation and duplicate-refund prevention
-- uses the same deterministic evaluator rules and failure evidence as insurance
-- intentionally requires an external HTTP agent; no e-commerce-specific branch exists in the evaluator or built-in demo
-
-### Customer Service Core Suite v1
-
-- typed cross-vertical suite combining `insurance-v1` and `ecommerce-v1`
+- typed suite composing insurance + e-commerce
 - stable 14-scenario execution order
-- runs through the existing `RunService`, evaluator, persistence, trends, regression and readiness stack
-- supported agent targets are derived from the intersection of included packs; this suite is external-HTTP-only
-- suite execution is persisted using the existing typed scenario snapshot, so no database schema change is required
+- external HTTP agent only
+- uses the exact same runner, evaluator, stores, trends, regression and readiness policy
 
 ### Deterministic evaluation
 
-- required/forbidden tool-call contracts
+SINAMA currently supports:
+
+- required / forbidden tools
 - exact structured argument constraints
 - tool-call-count limits
-- forbidden/required response phrases
+- required / forbidden response phrases
 - repeated-response detection
-- typed workflow constraints for tool prerequisites/order, argument existence, one-of values, regex full-match rules and numeric ranges
-- every failed rule exposes machine-readable evidence and a structured human-readable `Failure`
-- per-scenario Goal Completion, Tool Usage, Handoff, Safety and Conversation Quality metrics
-- best-effort masking of TC kimlik no / phone / card-like digit runs before evidence reaches the API response
+- tool prerequisites and ordering
+- required argument existence
+- one-of allowed values
+- regex full-match rules
+- inclusive numeric ranges
 
-### Generic scenario foundation
+Every violation can produce structured evidence and a human-readable `Failure` with severity, expected vs. actual behavior and a suggestion.
 
-- stable vertical-prefixed IDs such as `INS-001`, `ECOM-001` and future `BANK-001`
-- fixture discovery from vertical directories below `backend/app/scenario_data/`
-- validated generic tool references while preserving the built-in insurance enum for backward compatibility
-- generic `SyntheticContext.attributes` for domain-specific scalar fixture metadata
-- additive collection metadata keeps historical persisted pack snapshots valid
+### External agent testing
 
-The e-commerce proof pack demonstrates that adding a vertical no longer requires adding new core tool enum members or evaluator branches.
+External HTTPS agents use the same evidence pipeline as the built-in demo. The adapter:
 
-### Test Runs dashboard
+- validates public destinations and blocks localhost/private/link-local/cloud-metadata ranges
+- validates DNS and pins requests to validated public addresses
+- disables redirects and environment proxies
+- bounds timeout and response size
+- keeps bearer tokens ephemeral and out of run history/log/API responses
 
-- pack/suite-aware test collection selector
-- target compatibility driven by collection metadata rather than hard-coded insurance/e-commerce checks
-- focused components for configuration, history, evidence, regression, trends and readiness
-- active-run polling isolated in a bounded, abortable and non-overlapping hook
+### Baselines, regression and trends
 
-### Baseline & regression comparison
+Completed runs can become collection baselines. Compatible later runs expose:
 
-- mark any completed collection run as its baseline
-- compare a later compatible run against that baseline
-- run-level score delta, five metric deltas and `IMPROVED` / `STABLE` / `REGRESSION`
-- explicit New / Resolved / Persistent failure sets
-- a new critical failure always forces regression
-- optional `agent_version` metadata
-- explicit run-to-run comparison without changing baseline state
+- run score delta
+- per-metric delta
+- `IMPROVED` / `STABLE` / `REGRESSION`
+- New / Resolved / Persistent failure sets
+- critical-failure override
+- optional `agent_version`
+- compact version-aware reliability history
 
-### Version-aware reliability trends
+PostgreSQL trend queries use small denormalized metadata rather than reopening full transcript/check payloads.
 
-- recent terminal run history for a collection
-- version/agent identity, deterministic score, pass/fail/error counts and severity counts
-- same score threshold and new-critical override as regression comparison
-- execution-error runs remain visible with `score: null`
-- PostgreSQL trend listing uses queryable metadata instead of deserializing transcript/check payloads
-- Alembic revision `0004` backfilled historical trend metadata
-- lightweight dashboard surface with no charting dependency
+### Release Readiness
 
-### Release readiness
+`GET /api/runs/{run_id}/readiness` returns:
 
-- `GET /api/runs/{run_id}/readiness` returns `READY`, `WARNING` or `BLOCKED`
-- computed on demand from lifecycle state, execution errors, deterministic failure severity and regression evidence
-- orchestration/scenario errors, HIGH/CRITICAL failures and regressions block release
-- MEDIUM/LOW failures and missing/incompatible baseline evidence warn
-- every warning/blocker has a typed reason code and relevant scenario/failure reference when available
-- readiness does not persist another score or mutate baseline state
+- `READY`
+- `WARNING`
+- `BLOCKED`
 
-### Run history
+Current deterministic policy:
 
-- bounded in-memory store and durable PostgreSQL store behind one interface
-- completed runs, evidence and baseline assignment survive restarts in PostgreSQL mode
-- interrupted persisted runs are retired safely to `error`
-- full history persists while UI/API expose a recent window by default
+- orchestration/scenario execution error → blocked
+- HIGH / CRITICAL deterministic failure → blocked
+- regression → blocked
+- MEDIUM / LOW deterministic failure → warning
+- missing/incompatible baseline evidence → warning
+- clean baseline or clean stable/improved compatible run → ready
+
+Every warning/blocker has a typed reason and scenario/failure reference when applicable. Readiness is computed on demand; it is not a second persisted score.
+
+## Semantic Judge — Shadow Mode
+
+Some reliability questions are genuinely semantic. SINAMA now supports an optional second evidence layer for explicitly opted-in scenario rubrics.
+
+Initial semantic expectation types:
+
+- unsupported promise
+- user-intent satisfaction
+- internal-instruction disclosure
+
+Proof scenarios:
+
+- `INS-002` — unsupported payment guarantee
+- `INS-005` — internal instruction disclosure under prompt-injection pressure
+- `INS-007` — clarify ambiguity then follow the user's clarified intent
+
+Important: semantic evaluation is **advisory-only**.
+
+A semantic `FAIL`, timeout or provider error cannot change:
+
+- deterministic scenario status
+- deterministic severity / metrics / failures
+- regression direction
+- Release Readiness
+
+The judge runs only after deterministic scoring and PII masking. It receives the masked transcript and explicit rubric — not hidden scenario context. The UI exposes results under **Semantic Shadow** with PASS / FAIL / UNCERTAIN, reason, cited assistant turns, provider/model, latency and token usage when available.
+
+The provider is disabled by default, so the complete deterministic product requires no paid API:
+
+```text
+SINAMA_SEMANTIC_JUDGE_PROVIDER=disabled
+```
+
+Optional OpenAI shadow evaluation is configured only in the backend host/environment:
+
+```text
+SINAMA_SEMANTIC_JUDGE_PROVIDER=openai
+SINAMA_SEMANTIC_JUDGE_MODEL=gpt-5.4-nano
+SINAMA_SEMANTIC_JUDGE_API_KEY=<host-managed secret>
+```
+
+Never commit or paste the real key. CI uses fake judges and `httpx.MockTransport`; it makes no paid provider requests.
+
+See [Semantic Shadow design](docs/SEMANTIC_SHADOW.md).
 
 ## Architecture
 
@@ -200,8 +192,11 @@ FastAPI API
         |                    |
         |                    +--> Transcript + ToolEvent[]
         |
-        +--> Deterministic Evaluator
+        +--> Deterministic Evaluator  (authoritative)
         |      +--> Metrics + Failures
+        |
+        +--> PII Masking
+        |      +--> Optional Semantic Judge (shadow/advisory)
         |
         +--> Regression / Trends / Readiness
         |
@@ -210,40 +205,34 @@ FastAPI API
                +--> PostgreSQL
 ```
 
-Run history is selected with `SINAMA_RUN_STORE_BACKEND`:
-
-- `memory` — bounded single-process store, no database required.
-- `postgres` — durable standard PostgreSQL, including Supabase-compatible connection strings. SINAMA has no Supabase SDK/REST coupling.
-
-See [Technical architecture](docs/ARCHITECTURE.md) for the detailed boundaries.
-
-## External agent security
-
-Every external agent URL is untrusted input:
-
-- HTTPS required in production
-- localhost/private/link-local/cloud-metadata destinations blocked
-- DNS resolution validated and connection pinned to validated public address
-- redirects and environment proxies disabled
-- bounded total timeout and response size
-- bearer tokens are ephemeral and never persisted to run history, logs or API responses
+Semantic results are additive inside existing result JSON, so enabling shadow evaluation requires no database schema migration.
 
 ## Local development
 
 Requirements: Node.js 22.13+, pnpm 11, Python 3.11+.
 
-### Backend
-
-From `backend/`:
+Backend:
 
 ```powershell
+cd backend
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -e ".[dev]"
 uvicorn app.main:app --reload --port 8000
 ```
 
-For durable PostgreSQL history:
+Frontend:
+
+```powershell
+cd frontend
+Copy-Item .env.example .env.local
+pnpm install
+pnpm dev
+```
+
+Open `http://localhost:3000/runs`.
+
+### Durable PostgreSQL history
 
 ```powershell
 $env:SINAMA_RUN_STORE_BACKEND = "postgres"
@@ -252,51 +241,20 @@ alembic upgrade head
 uvicorn app.main:app --reload --port 8000
 ```
 
-Railway runs `alembic upgrade head` in its pre-deploy phase. Runtime startup does not perform schema migrations; it only applies narrow idempotent RLS hardening to known tables.
+Railway executes `alembic upgrade head` during pre-deploy. Application runtime does not perform schema migration; startup only applies narrow idempotent RLS hardening to known persistence tables.
 
-### Frontend
-
-From `frontend/`:
-
-```powershell
-Copy-Item .env.example .env.local
-pnpm install
-pnpm dev
-```
-
-Open `http://localhost:3000/runs` for automated test runs.
-
-## Automated test runs
-
-Open `/runs`, select a pack or suite, then choose one of the agent targets supported by that collection. E-commerce and the cross-vertical suite automatically disable the built-in insurance demo target and require an external HTTP endpoint.
-
-Run lifecycle (`queued`, `running`, `completed`, `error`) describes orchestration. Scenario outcome (`pass`, `fail`, `error`) describes evaluation.
-
-API surface:
+## Main API surfaces
 
 - `GET /health`
 - `POST /api/agents/external/test-connection`
-- `GET /api/scenario-packs` — compatibility collection view used by the run selector
-- `GET /api/test-suites` — first-class typed suite metadata
-- `GET /api/scenario-packs/{collection_id}/trends?limit=20`
-- `GET /api/test-suites/{suite_id}/trends?limit=20`
+- `GET /api/scenario-packs`
+- `GET /api/test-suites`
+- pack/suite trend endpoints
 - `POST /api/runs`
-- `GET /api/runs?limit=20`
-- `GET /api/runs/{run_id}`
-- `GET /api/runs/{run_id}/results`
-- `GET /api/runs/{run_id}/results/{scenario_id}`
+- `GET /api/runs`
+- run summary / result detail endpoints
 - `GET /api/runs/{run_id}/readiness`
-- `POST /api/runs/{run_id}/baseline`
-- `GET /api/runs/{run_id}/comparison`
-- `GET /api/runs/{current_run_id}/compare/{reference_run_id}`
-
-## Evaluation scope
-
-```text
-evaluation_scope = deterministic_tool_contract
-```
-
-Semantic natural-language expectations remain explicitly unscored unless a deterministic structured rule covers them. The next evaluator layer is an optional semantic judge in shadow mode, not a replacement for deterministic contracts.
+- baseline / comparison endpoints
 
 ## Quality gate
 
@@ -316,36 +274,33 @@ pnpm typecheck
 pnpm build
 ```
 
-GitHub Actions runs the same quality gate on pull requests and integration/stable pushes.
+GitHub Actions runs the same gate on integration/release PRs.
 
 ## Current limitations
 
 - default memory backend is bounded and ephemeral
-- playground conversations are always in memory
 - interrupted persisted runs cannot resume because there is no durable worker queue
-- no semantic/LLM judge yet; semantic expectations remain explicitly unscored
-- no saved agent connections or authentication/multi-user separation
+- semantic judge is intentionally shadow-only and uncalibrated for blocking decisions
+- no saved agent connections, authentication or multi-user separation
 - no billing, distributed workers or voice-agent testing
 
-## Next
+## Next phase
 
-1. semantic/LLM judge in explicit shadow mode for genuinely semantic expectations
+The planned MVP feature sequence is complete. The next work should prioritize **calibration and stabilization**, not feature count:
+
+1. build a hand-labeled semantic calibration set and measure agreement / false-positive / false-negative rates
+2. run end-to-end external-agent acceptance tests against representative demo endpoints
+3. polish recruiter-facing product copy/screenshots and portfolio narrative
+4. address maintenance items (for example CI action runtime upgrades) without expanding product scope unnecessarily
 
 ## Documentation
 
 - [Product brief](docs/PRD.md)
 - [MVP scope](docs/MVP.md)
 - [Technical architecture](docs/ARCHITECTURE.md)
+- [Semantic Shadow](docs/SEMANTIC_SHADOW.md)
 - [Security and secrets](docs/SECURITY.md)
 - [Current implementation handoff](docs/CODEX_HANDOFF.md)
-- [First vertical slice](docs/FIRST_VERTICAL_SLICE.md) — historical proof context
-
-## Development workflow
-
-- `main` is stable/release.
-- `develop` is integration.
-- focused feature branches start from `develop` and target `develop` through PRs.
-- `develop` is promoted to `main` only after full CI/release review.
 
 ## License
 
