@@ -9,9 +9,9 @@ from app.agent_adapters import AgentAdapter, AgentSession, AgentTurnResult
 from app.http_agent import ExternalAgentConfiguration
 from app.models import AgentMode, AgentTarget, ToolEvent
 from app.scenario_packs import ScenarioPackRegistry, ScenarioPackSummary
-from app.scenario_runner import RunStatus, ScenarioRunResult, scenario_runner
+from app.scenario_runner import RunStatus, ScenarioRunResult
 from app.scenarios import Scenario, load_scenario_by_id
-from app.test_runs import InvalidRunAgentConfigurationError, InMemoryRunStore, RunService
+from app.test_runs import InMemoryRunStore, InvalidRunAgentConfigurationError, RunService
 
 
 def event(tool: str, arguments: dict[str, str | bool | int | float | None]) -> ToolEvent:
@@ -97,7 +97,9 @@ class EcommerceAdapter:
             )
         if "bir daha" in message:
             return AgentTurnResult(
-                assistant_message="Aynı sipariş için mevcut iade kaydını kullanıyorum; ikinci iade açmıyorum."
+                assistant_message=(
+                    "Aynı sipariş için mevcut iade kaydını kullanıyorum; ikinci iade açmıyorum."
+                )
             )
         return AgentTurnResult(assistant_message="Sipariş numaranızı paylaşır mısınız?")
 
