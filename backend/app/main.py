@@ -237,11 +237,16 @@ def _memory_run_trends(collection_id: str, limit: int) -> RunTrendResponse:
     return build_run_trends(collection_id, inputs)
 
 
-def _run_collection_trends(collection_id: str, limit: int) -> RunTrendResponse:
+def _run_collection_trends(
+    collection_id: str,
+    limit: int,
+    *,
+    not_found_detail: str,
+) -> RunTrendResponse:
     try:
         scenario_pack_registry.get_collection(collection_id)
     except ScenarioCollectionNotFoundError as error:
-        raise HTTPException(status_code=404, detail="Scenario collection not found") from error
+        raise HTTPException(status_code=404, detail=not_found_detail) from error
 
     if isinstance(run_store, TrendStore):
         return run_store.list_trends(collection_id, limit)
@@ -257,7 +262,11 @@ def get_run_trends(
     pack_id: str,
     limit: int = Query(default=20, ge=1, le=100),
 ) -> RunTrendResponse:
-    return _run_collection_trends(pack_id, limit)
+    return _run_collection_trends(
+        pack_id,
+        limit,
+        not_found_detail="Scenario pack not found",
+    )
 
 
 @app.get(
@@ -269,7 +278,11 @@ def get_test_suite_trends(
     suite_id: str,
     limit: int = Query(default=20, ge=1, le=100),
 ) -> RunTrendResponse:
-    return _run_collection_trends(suite_id, limit)
+    return _run_collection_trends(
+        suite_id,
+        limit,
+        not_found_detail="Test suite not found",
+    )
 
 
 @app.post(
@@ -288,7 +301,8 @@ async def create_test_run(request: CreateTestRunRequest) -> TestRunSummary:
             agent_version=request.agent_version,
         )
     except ScenarioCollectionNotFoundError as error:
-        raise HTTPException(status_code=404, detail="Scenario collection not found") from error
+        # Preserve the original API error text for older pack-only clients.
+        raise HTTPException(status_code=404, detail="Scenario pack not found") from error
     except InvalidRunAgentConfigurationError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
 
