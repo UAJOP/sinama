@@ -296,12 +296,11 @@ class OpenAISemanticJudge:
             if not isinstance(content, list):
                 continue
             for part in content:
-                if (
-                    isinstance(part, dict)
-                    and part.get("type") == "output_text"
-                    and isinstance(part.get("text"), str)
-                ):
-                    return part["text"]
+                if not isinstance(part, dict) or part.get("type") != "output_text":
+                    continue
+                text = part.get("text")
+                if isinstance(text, str):
+                    return text
         raise ValueError
 
     @staticmethod
