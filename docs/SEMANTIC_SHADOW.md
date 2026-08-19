@@ -139,6 +139,27 @@ $env:SINAMA_SEMANTIC_JUDGE_MODEL = "gpt-5.4-nano"
 sinama-semantic-calibrate --repeats 1
 ```
 
+### Zero-cost local calibration (no API key, no spend)
+
+Calibration can also run entirely offline against a local [Ollama](https://ollama.com) daemon, which needs no API key and makes no paid request:
+
+```powershell
+ollama serve          # if not already running as a service
+ollama pull qwen3:4b
+sinama-semantic-calibrate --local-ollama --repeats 1
+```
+
+`--ollama-model` selects a different local tag and `--ollama-url` points at a different loopback port. Both default to `qwen3:4b` and `http://localhost:11434`.
+
+This path is **calibration tooling only** and is deliberately kept out of the product:
+
+- `SemanticJudgeProvider` has no `ollama` member, so no value of `SINAMA_SEMANTIC_JUDGE_PROVIDER` routes a scenario run to a local model.
+- `build_semantic_judge` — the only judge constructor the production scenario runner uses — never builds it.
+- No FastAPI route constructs it, so no caller-supplied localhost URL is reachable through the product API.
+- The adapter validates its base URL is loopback, so it cannot be repurposed as a general outbound HTTP client. The external-agent SSRF boundary in `http_agent.py` remains authoritative for agent traffic and is untouched.
+
+Local-model evidence must be labelled as such. A small local model is a cheap calibration instrument, not a substitute for hosted-provider validation, and results from the two are not interchangeable.
+
 For repeated-run stability:
 
 ```powershell
