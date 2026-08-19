@@ -195,7 +195,10 @@ async def test_external_agent_connection(
     tags=["test-runs"],
 )
 def list_scenario_packs() -> list[ScenarioPackSummary]:
-    return scenario_pack_registry.list_packs()
+    # Compatibility view: legacy clients already use this endpoint for the run
+    # selector, so it now returns every executable collection while suites also
+    # remain available through their first-class typed endpoint below.
+    return scenario_pack_registry.list_collections()
 
 
 @app.get(
