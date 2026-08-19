@@ -44,6 +44,10 @@ class Settings(BaseSettings):
     semantic_judge_model: str = Field(default="gpt-5.4-nano", min_length=1, max_length=128)
     semantic_judge_timeout_seconds: float = Field(default=8.0, gt=0, le=20.0)
     semantic_judge_max_input_chars: int = Field(default=16_000, ge=2_000, le=50_000)
+    # Calibration-only. A local CPU model is far slower than a hosted call, so the
+    # offline calibration path gets its own budget. Nothing in the production
+    # semantic path reads this value.
+    semantic_judge_local_timeout_seconds: float = Field(default=180.0, gt=0, le=600.0)
 
     model_config = SettingsConfigDict(
         env_file=".env",
