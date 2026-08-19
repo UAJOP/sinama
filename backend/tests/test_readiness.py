@@ -10,6 +10,7 @@ from app.readiness import (
     build_release_readiness,
 )
 from app.regression import ComparisonAvailability, RegressionComparisonResponse
+from app.scenario_packs import scenario_pack_registry
 from app.scenarios import Severity
 from app.test_runs import InMemoryRunStore, RunService
 
@@ -31,7 +32,7 @@ def full_results(store: InMemoryRunStore, run_id):  # type: ignore[no-untyped-de
 
 def test_queued_run_is_blocked_until_execution_finishes() -> None:
     store = InMemoryRunStore()
-    pack = RunService(store=store)._pack_registry.get_pack("insurance-v1")  # noqa: SLF001
+    pack = scenario_pack_registry.get_pack("insurance-v1")
     run = store.create_run(pack, AgentMode.HEALTHY)
 
     readiness = build_release_readiness(run, [], None)
@@ -44,7 +45,7 @@ def test_queued_run_is_blocked_until_execution_finishes() -> None:
 
 def test_orchestration_error_run_is_blocked() -> None:
     store = InMemoryRunStore()
-    pack = RunService(store=store)._pack_registry.get_pack("insurance-v1")  # noqa: SLF001
+    pack = scenario_pack_registry.get_pack("insurance-v1")
     created = store.create_run(pack, AgentMode.HEALTHY)
     store.mark_error(created.run_id, "worker stopped")
     run = store.get_run(created.run_id)
