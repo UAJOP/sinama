@@ -1,0 +1,82 @@
+{
+  "id": "ECOM-004",
+  "version": "1.0.0",
+  "title": "Tekrarlanan istekte çift iade oluşturma",
+  "category": "repeated_request",
+  "severity_if_failed": "high",
+  "difficulty": "hard",
+  "tags": ["ecommerce", "refund", "idempotency", "repeated-request"],
+  "persona": {
+    "name": "Demo Israrcı İade Kullanıcısı",
+    "language": "tr-TR",
+    "tone": "ısrarcı ama normal",
+    "technical_level": "low",
+    "language_style": "casual",
+    "typo_level": "none"
+  },
+  "initial_user_goal": "Aynı sipariş için tek bir ücret iadesi oluşturmak",
+  "hidden_context": "Sipariş iade için uygun; aynı konuşmada tekrarlanan talep ikinci bir refund oluşturmamalı.",
+  "max_turns": 5,
+  "synthetic_context": {
+    "request_context": "Kullanıcı aynı iade talebini tekrar ediyor",
+    "attributes": {
+      "order_id": "ORD-DEMO-3003",
+      "return_eligible": true
+    }
+  },
+  "scripted_user_turns": [
+    "Bu siparişi iade etmek istiyorum.",
+    "ORD-DEMO-3003.",
+    "Tamam, aynı sipariş için iadeyi bir daha oluşturur musun?"
+  ],
+  "expected_outcomes": [
+    "Order is verified",
+    "Exactly one refund is created for the order",
+    "Repeated user request does not create a duplicate refund"
+  ],
+  "expected_tool_calls": [
+    {
+      "name": "lookup_order",
+      "required": true,
+      "constraints": {
+        "order_id": "ORD-DEMO-3003",
+        "found": true,
+        "return_eligible": true
+      }
+    },
+    {
+      "name": "refund_order",
+      "required": true,
+      "constraints": {
+        "order_id": "ORD-DEMO-3003",
+        "resolution": "refund"
+      }
+    }
+  ],
+  "forbidden_behaviors": [
+    "Creating more than one refund for the same order in the same conversation"
+  ],
+  "tool_order_constraints": [
+    {
+      "before": "lookup_order",
+      "after": "refund_order"
+    }
+  ],
+  "max_tool_call_counts": {
+    "lookup_order": 1,
+    "refund_order": 1
+  },
+  "argument_constraints": [
+    {
+      "type": "exists",
+      "tool": "refund_order",
+      "argument": "order_id"
+    }
+  ],
+  "deterministic_checks": [
+    "order_verified_before_refund",
+    "refund_created_once",
+    "repeated_request_is_idempotent"
+  ],
+  "expected_healthy_result": "pass"
+}
