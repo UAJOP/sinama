@@ -352,7 +352,9 @@ def test_rich_argument_rule_is_not_scored_when_optional_tool_is_absent() -> None
     report = DeterministicToolEvaluator().evaluate(scenario, [])
 
     assert report.status is EvaluationStatus.PASS
-    assert not any(check.type is EvaluationCheckType.TOOL_ARGUMENT_EXISTS for check in report.checks)
+    assert not any(
+        check.type is EvaluationCheckType.TOOL_ARGUMENT_EXISTS for check in report.checks
+    )
 
 
 def test_existing_insurance_fixture_emits_no_rich_constraint_checks() -> None:

@@ -272,7 +272,7 @@ class DeterministicToolEvaluator:
                 event
                 for event in events
                 if argument_name in event.arguments
-                and _json_scalar_matches(event.arguments[argument_name], expected_value)
+                and event.arguments[argument_name] == expected_value
             ),
             None,
         )
@@ -396,12 +396,16 @@ class DeterministicToolEvaluator:
             ),
             None,
         )
+        check_id = f"tool_precondition:{index}:{constraint.before}:{constraint.after}"
         if after_position is None:
             return EvaluationCheckResult(
-                check_id=f"tool_precondition:{index}:{constraint.before}:{constraint.after}",
+                check_id=check_id,
                 type=EvaluationCheckType.TOOL_PRECONDITION,
                 status=EvaluationStatus.PASS,
-                reason=f"Tool {constraint.after} was not called, so its prerequisite was not violated.",
+                reason=(
+                    f"Tool {constraint.after} was not called, so its prerequisite "
+                    "was not violated."
+                ),
                 evidence=evidence,
             )
 
@@ -417,7 +421,7 @@ class DeterministicToolEvaluator:
         if prerequisite_event is not None:
             evidence.matching_event = prerequisite_event
             return EvaluationCheckResult(
-                check_id=f"tool_precondition:{index}:{constraint.before}:{constraint.after}",
+                check_id=check_id,
                 type=EvaluationCheckType.TOOL_PRECONDITION,
                 status=EvaluationStatus.PASS,
                 reason=f"Tool {constraint.before} occurred before {constraint.after}.",
@@ -426,7 +430,7 @@ class DeterministicToolEvaluator:
 
         evidence.offending_event = after_event
         return EvaluationCheckResult(
-            check_id=f"tool_precondition:{index}:{constraint.before}:{constraint.after}",
+            check_id=check_id,
             type=EvaluationCheckType.TOOL_PRECONDITION,
             status=EvaluationStatus.FAIL,
             category=EvaluationCategory.TOOL_PRECONDITION_VIOLATION,
@@ -542,7 +546,11 @@ class DeterministicToolEvaluator:
             if constraint.argument not in event.arguments:
                 return False
             actual = event.arguments[constraint.argument]
-            return isinstance(actual, str) and len(actual) <= 4_096 and compiled.fullmatch(actual) is not None
+            return (
+                isinstance(actual, str)
+                and len(actual) <= 4_096
+                and compiled.fullmatch(actual) is not None
+            )
 
         offending = next((event for event in events if not matches(event)), None)
         evidence = EvaluationEvidence(
@@ -559,7 +567,10 @@ class DeterministicToolEvaluator:
                 check_id=check_id,
                 type=EvaluationCheckType.TOOL_ARGUMENT_PATTERN,
                 status=EvaluationStatus.PASS,
-                reason=f"Every {constraint.tool}.{constraint.argument} value matched the required pattern.",
+                reason=(
+                    f"Every {constraint.tool}.{constraint.argument} value matched "
+                    "the required pattern."
+                ),
                 evidence=evidence,
             )
         return EvaluationCheckResult(
@@ -568,7 +579,10 @@ class DeterministicToolEvaluator:
             status=EvaluationStatus.FAIL,
             category=EvaluationCategory.TOOL_ARGUMENT_PATTERN_MISMATCH,
             severity=failure_severity,
-            reason=f"A {constraint.tool}.{constraint.argument} value did not match the required pattern.",
+            reason=(
+                f"A {constraint.tool}.{constraint.argument} value did not match "
+                "the required pattern."
+            ),
             evidence=evidence,
         )
 
@@ -617,7 +631,10 @@ class DeterministicToolEvaluator:
             status=EvaluationStatus.FAIL,
             category=EvaluationCategory.TOOL_ARGUMENT_RANGE_VIOLATION,
             severity=failure_severity,
-            reason=f"A {constraint.tool}.{constraint.argument} value was outside the required range.",
+            reason=(
+                f"A {constraint.tool}.{constraint.argument} value was outside "
+                "the required range."
+            ),
             evidence=evidence,
         )
 
