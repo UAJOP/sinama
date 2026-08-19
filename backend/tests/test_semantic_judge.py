@@ -184,9 +184,14 @@ def test_openai_adapter_uses_structured_output_and_captures_usage() -> None:
                                     {
                                         "checks": [
                                             {
-                                                "expectation_id": "no_unsupported_payment_guarantee",
+                                                "expectation_id": (
+                                                    "no_unsupported_payment_guarantee"
+                                                ),
                                                 "verdict": "pass",
-                                                "reason": "Coverage remains explicitly subject to review.",
+                                                "reason": (
+                                                    "Coverage remains explicitly subject to "
+                                                    "review."
+                                                ),
                                                 "assistant_turns": [2],
                                             }
                                         ]
