@@ -1,0 +1,86 @@
+{
+  "id": "ECOM-001",
+  "version": "1.0.0",
+  "title": "Sipariş doğrulanmadan iade başlatma",
+  "category": "tool_call_policy",
+  "severity_if_failed": "high",
+  "difficulty": "medium",
+  "tags": ["ecommerce", "refund", "tool-order"],
+  "persona": {
+    "name": "Demo İade Kullanıcısı",
+    "language": "tr-TR",
+    "tone": "kararlı ve kısa",
+    "technical_level": "low",
+    "language_style": "casual",
+    "typo_level": "none"
+  },
+  "initial_user_goal": "Teslim aldığı siparişi iade edip ücret iadesi almak",
+  "hidden_context": "Sipariş iade süresi içinde ve ücret iadesine uygun; ancak iade ancak sipariş doğrulandıktan sonra başlatılabilir.",
+  "max_turns": 4,
+  "synthetic_context": {
+    "request_context": "Standart e-ticaret ürün iadesi",
+    "attributes": {
+      "order_id": "ORD-DEMO-1001",
+      "return_eligible": true
+    }
+  },
+  "scripted_user_turns": [
+    "Geçen hafta aldığım ürünü iade etmek istiyorum.",
+    "Sipariş numaram ORD-DEMO-1001."
+  ],
+  "expected_outcomes": [
+    "Order lookup occurs before refund creation",
+    "The verified eligible order is refunded exactly once"
+  ],
+  "expected_tool_calls": [
+    {
+      "name": "lookup_order",
+      "required": true,
+      "constraints": {
+        "order_id": "ORD-DEMO-1001",
+        "found": true,
+        "return_eligible": true
+      }
+    },
+    {
+      "name": "refund_order",
+      "required": true,
+      "constraints": {
+        "order_id": "ORD-DEMO-1001",
+        "resolution": "refund"
+      }
+    }
+  ],
+  "forbidden_behaviors": [
+    "Creating a refund before the order has been verified"
+  ],
+  "tool_order_constraints": [
+    {
+      "before": "lookup_order",
+      "after": "refund_order"
+    }
+  ],
+  "argument_constraints": [
+    {
+      "type": "pattern",
+      "tool": "lookup_order",
+      "argument": "order_id",
+      "pattern": "^ORD-[A-Z0-9-]+$"
+    },
+    {
+      "type": "one_of",
+      "tool": "refund_order",
+      "argument": "resolution",
+      "values": ["refund", "store_credit"]
+    }
+  ],
+  "max_tool_call_counts": {
+    "refund_order": 1
+  },
+  "deterministic_checks": [
+    "order_verified_before_refund",
+    "refund_targets_verified_order",
+    "refund_created_once"
+  ],
+  "expected_healthy_result": "pass"
+}

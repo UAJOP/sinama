@@ -29,8 +29,9 @@ from app.models import (
 from app.readiness import ReleaseReadinessResponse, build_release_readiness
 from app.regression import RegressionComparisonResponse
 from app.scenario_packs import (
-    ScenarioPackNotFoundError,
+    ScenarioCollectionNotFoundError,
     ScenarioPackSummary,
+    TestSuiteSummary,
     scenario_pack_registry,
 )
 from app.scenario_runner import ScenarioRunResult, scenario_runner
@@ -86,7 +87,8 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 app = FastAPI(
     title="SINAMA API",
     description=(
-        "Local API for the built-in Demo Insurance Agent and deterministic scenario runner."
+        "API for deterministic scenario-pack and test-suite execution against built-in or "
+        "external customer-service agents."
     ),
     version="0.1.0",
     lifespan=lifespan,
@@ -193,14 +195,26 @@ async def test_external_agent_connection(
     tags=["test-runs"],
 )
 def list_scenario_packs() -> list[ScenarioPackSummary]:
-    return scenario_pack_registry.list_packs()
+    # Compatibility view: legacy clients already use this endpoint for the run
+    # selector, so it now returns every executable collection while suites also
+    # remain available through their first-class typed endpoint below.
+    return scenario_pack_registry.list_collections()
 
 
-def _memory_run_trends(pack_id: str, limit: int) -> RunTrendResponse:
+@app.get(
+    "/api/test-suites",
+    response_model=list[TestSuiteSummary],
+    tags=["test-runs"],
+)
+def list_test_suites() -> list[TestSuiteSummary]:
+    return scenario_pack_registry.list_suites()
+
+
+def _memory_run_trends(collection_id: str, limit: int) -> RunTrendResponse:
     summaries = [
         run
         for run in run_store.list_runs(100)
-        if run.pack_id == pack_id and run.lifecycle_status in {"completed", "error"}
+        if run.pack_id == collection_id and run.lifecycle_status in {"completed", "error"}
     ][:limit]
     inputs = []
     for summary in summaries:
@@ -223,7 +237,23 @@ def _memory_run_trends(pack_id: str, limit: int) -> RunTrendResponse:
                 results=full_results,
             )
         )
-    return build_run_trends(pack_id, inputs)
+    return build_run_trends(collection_id, inputs)
+
+
+def _run_collection_trends(
+    collection_id: str,
+    limit: int,
+    *,
+    not_found_detail: str,
+) -> RunTrendResponse:
+    try:
+        scenario_pack_registry.get_collection(collection_id)
+    except ScenarioCollectionNotFoundError as error:
+        raise HTTPException(status_code=404, detail=not_found_detail) from error
+
+    if isinstance(run_store, TrendStore):
+        return run_store.list_trends(collection_id, limit)
+    return _memory_run_trends(collection_id, limit)
 
 
 @app.get(
@@ -235,14 +265,27 @@ def get_run_trends(
     pack_id: str,
     limit: int = Query(default=20, ge=1, le=100),
 ) -> RunTrendResponse:
-    try:
-        scenario_pack_registry.get_pack(pack_id)
-    except ScenarioPackNotFoundError as error:
-        raise HTTPException(status_code=404, detail="Scenario pack not found") from error
+    return _run_collection_trends(
+        pack_id,
+        limit,
+        not_found_detail="Scenario pack not found",
+    )
 
-    if isinstance(run_store, TrendStore):
-        return run_store.list_trends(pack_id, limit)
-    return _memory_run_trends(pack_id, limit)
+
+@app.get(
+    "/api/test-suites/{suite_id}/trends",
+    response_model=RunTrendResponse,
+    tags=["test-runs"],
+)
+def get_test_suite_trends(
+    suite_id: str,
+    limit: int = Query(default=20, ge=1, le=100),
+) -> RunTrendResponse:
+    return _run_collection_trends(
+        suite_id,
+        limit,
+        not_found_detail="Test suite not found",
+    )
 
 
 @app.post(
@@ -260,7 +303,8 @@ async def create_test_run(request: CreateTestRunRequest) -> TestRunSummary:
             external_agent=request.external_agent,
             agent_version=request.agent_version,
         )
-    except ScenarioPackNotFoundError as error:
+    except ScenarioCollectionNotFoundError as error:
+        # Preserve the original API error text for older pack-only clients.
         raise HTTPException(status_code=404, detail="Scenario pack not found") from error
     except InvalidRunAgentConfigurationError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error

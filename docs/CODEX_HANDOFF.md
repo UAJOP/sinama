@@ -2,7 +2,7 @@
 
 ## Mission
 
-Continue SINAMA as a Turkish-first AI Agent Reliability Lab for testing customer-service agents before production. The first vertical slice is complete; new work must strengthen the existing reliability product rather than rebuild the demo from scratch.
+Continue SINAMA as a Turkish-first AI Agent Reliability Lab for testing customer-service agents before production. The deterministic MVP now spans multiple verticals; new work should deepen semantic coverage without weakening inspectability or release discipline.
 
 Read these first:
 
@@ -19,37 +19,47 @@ The repository already includes:
 
 - Next.js/TypeScript frontend and FastAPI/Python backend
 - deterministic Healthy/Broken insurance demo agent
-- ten hand-reviewed Turkish insurance scenarios (`INS-001`–`INS-010`)
-- async multi-turn scenario execution through an `AgentAdapter` boundary
+- `insurance-v1` with ten hand-reviewed Turkish scenarios
+- `ecommerce-v1` with four hand-reviewed Turkish scenarios using generic tools such as `lookup_order`, `refund_order` and `escalate_return_case`
+- typed `customer-service-core-v1` suite composing both packs into one stable 14-scenario run
+- collection-level allowed-agent-target metadata; e-commerce and cross-vertical suite are external HTTP only
+- async multi-turn execution through one `AgentAdapter` / RunService pipeline
 - SSRF-hardened external HTTP agent testing with ephemeral bearer tokens
-- deterministic required/forbidden tool checks and exact argument checks
-- tool-call-count, required/forbidden phrase and loop-repetition checks
-- typed workflow constraints for tool prerequisites/order, argument existence, one-of values, regex full-match rules and inclusive numeric ranges
-- inspectable evidence and structured `Failure` output for every deterministic violation
-- transcripts, structured tool traces and per-dimension metrics
+- deterministic required/forbidden tool checks, exact arguments, call counts, response phrases and loop detection
+- typed workflow constraints for tool prerequisites/order, argument existence, one-of values, regex and numeric ranges
+- inspectable `EvaluationEvidence`, structured `Failure` objects and per-dimension metrics
 - in-memory and PostgreSQL run stores behind one interface
-- persistent run history and baseline assignment
-- optional `agent_version` metadata
-- baseline regression comparison and explicit run-to-run comparison
-- version-aware reliability trends with PostgreSQL query metadata/backfill
+- persistent history, baseline assignment, explicit comparison, version trends and release readiness
 - deterministic `READY` / `WARNING` / `BLOCKED` release-readiness policy with machine-readable reasons
-- startup recovery for interrupted persisted runs
-- PostgreSQL RLS hardening for persistence tables
-- a behavior-preserving `/runs` maintainability refactor with focused UI components and an isolated polling hook
-- focused trend and release-readiness UI surfaces that do not re-grow the dashboard monolith
-- CI gates for backend tests/lint/typechecking and frontend lint/typechecking/build
+- target-aware `/runs` selector plus focused evidence/trend/readiness UI components
+- startup recovery, PostgreSQL RLS hardening and Railway pre-deploy Alembic migrations
+- CI gates for backend tests/Ruff/mypy and frontend lint/typecheck/build
 
 ## Platform boundary
 
-Do not couple future external-agent support to the insurance demo's `ToolName` enum.
+The built-in insurance `ToolName` enum is not the platform contract.
 
-Known insurance demo tools retain their enum representation for backward compatibility, but external agents and scenario contracts support validated custom tool identifiers. Scenario IDs support vertical prefixes such as `INS-001`, `ECOM-001` and `BANK-001`, and fixtures are discovered from vertical directories below `app/scenario_data/`.
+External agents and scenario fixtures support validated generic tool identifiers. The e-commerce pack proves that new verticals do not require new core tool enum members or domain-specific evaluator branches.
 
-The insurance demo is a proof pack, not the product domain.
+Scenario fixtures live in vertical directories below `app/scenario_data/` and use stable IDs such as `INS-001` and `ECOM-001`.
+
+## Packs and suites
+
+A run resolves a scenario **collection**:
+
+- `insurance-v1` — 10 scenarios, built-in demo or external HTTP
+- `ecommerce-v1` — 4 scenarios, external HTTP only
+- `customer-service-core-v1` — suite of both packs, 14 scenarios, external HTTP only
+
+Suite execution must remain a composition concern, not a scoring concern. The registry flattens included packs in declared order and computes supported targets by intersection. RunService, evaluator, stores, trends and readiness remain unchanged by domain.
+
+The API request field is still named `pack_id` for backwards compatibility even when it contains a suite ID.
+
+Historical persisted pack snapshots must keep validating. New collection fields are additive with defaults; suite composition lives inside the existing JSON snapshot and does not require a database schema change.
 
 ## Deterministic evaluator contract
 
-Prefer small typed rules over a general expression language. The evaluator currently supports:
+Prefer typed rules over a general expression language. Current deterministic checks include:
 
 - required/forbidden tools
 - exact argument values
@@ -58,39 +68,34 @@ Prefer small typed rules over a general expression language. The evaluator curre
 - repeated-response detection
 - conditional tool prerequisites/order
 - argument existence
-- one-of allowed values
-- regex full-match format rules
-- inclusive numeric min/max ranges
+- one-of values
+- regex full-match
+- inclusive numeric ranges
 
-A prerequisite rule fails when its `after` tool is observed before the required `before` tool. If the `after` tool never occurs, the conditional rule is not violated. Rich argument rules validate every observed call of their target tool. If an optional tool is absent, argument rules do not invent a failure; required-tool checks own tool absence.
-
-Each failed deterministic rule must retain concrete `EvaluationEvidence` and map to a structured `Failure`. New deterministic checks should feed existing metric dimensions instead of creating parallel scoring semantics.
+Each failed rule must retain concrete evidence and map to a structured failure. New deterministic checks should feed existing metrics instead of inventing parallel scoring semantics.
 
 ## Release-readiness policy
 
-Release readiness is an on-demand policy over evidence that already exists; it is not another score and is not persisted separately.
-
-Current rules:
+Readiness remains deterministic and on-demand:
 
 - orchestration/scenario execution errors => `BLOCKED`
 - HIGH/CRITICAL deterministic failures => `BLOCKED`
-- detected baseline regression => `BLOCKED`
+- regression => `BLOCKED`
 - MEDIUM/LOW deterministic failures => `WARNING`
-- missing/incompatible baseline evidence => `WARNING`
+- missing/incompatible baseline => `WARNING`
 - clean baseline or clean stable/improved compatible run => `READY`
 
-Every warning/blocker must keep a typed reason code and relevant scenario/failure reference when one exists. Do not make a future semantic judge silently block release; shadow-mode semantic evidence remains advisory unless a separate policy change explicitly promotes it.
+Do not make a future semantic judge silently change these rules. Semantic evidence starts advisory/shadow-only.
 
 ## Development workflow
 
 - `main` is stable/release.
-- `develop` is the integration branch.
-- Active work starts from `develop` on a focused feature branch.
-- Feature PRs target `develop`.
-- Promote `develop` to `main` only after CI and release review are clean.
-- Do not bypass the PR flow for normal feature work.
+- `develop` is integration.
+- focused feature branches start from `develop`.
+- feature PRs target `develop`.
+- promote `develop` to `main` only after full CI and release review.
 
-Before a PR is ready, validate:
+Required validation:
 
 ### Backend
 
@@ -108,42 +113,50 @@ pnpm typecheck
 pnpm build
 ```
 
-GitHub Actions runs the same quality gate on PRs and integration/stable pushes.
-
 ## Engineering constraints
 
-- Never commit secrets, tokens, database credentials or generated `.env` files.
-- External-agent credentials remain ephemeral and must never enter run history, logs or API responses.
-- Prefer typed Pydantic/TypeScript contracts over loosely shaped dictionaries at public boundaries.
-- Prefer deterministic evaluation whenever the rule can be represented structurally.
-- Do not add arbitrary executable expressions or user-authored code to scenario fixtures.
-- Do not add a second scoring system inside storage, UI, regression or readiness modules.
-- Persisted payloads must remain readable/validatable through explicit model contracts and migrations.
-- Keep memory and SQL stores behaviorally aligned through shared projections/evaluation logic.
-- Do not introduce Redis, Celery, Kafka or another queue until a real durability/throughput requirement exists.
-- Do not add auth, billing, multi-tenancy or voice merely to make the product look larger.
-- Keep the refactored `/runs` component boundaries focused as new UI surfaces are added.
+- never commit secrets, tokens, database credentials or generated `.env` files
+- external-agent credentials remain ephemeral
+- prefer typed Pydantic/TypeScript contracts
+- deterministic evidence remains authoritative where a rule can be expressed structurally
+- do not add arbitrary executable expressions to fixtures
+- do not add a second scoring system in storage/UI/regression/readiness
+- keep memory and PostgreSQL stores behaviorally aligned
+- preserve persisted-model compatibility or use explicit migrations
+- do not add Redis/Celery/Kafka without a real workload requirement
+- keep `/runs` component boundaries focused
+- keep new verticals out of core evaluator branching
 
-## Immediate roadmap
+## Immediate roadmap — Semantic Judge Shadow Mode
 
-### 1. Test suites / second vertical
+Add optional LLM-based evaluation only for expectations that cannot be represented reliably with deterministic contracts.
 
-Compose scenario groups beyond one insurance pack and prove the generic boundary with a small second vertical such as e-commerce or banking. Keep scenario ground truth hand-reviewed and include at least one domain-specific tool identifier outside the insurance demo enum.
+First target judgments:
 
-The second vertical must run through the same runner/evaluator/store/readiness stack without introducing domain-specific branches into core scoring logic.
+- unsupported promises / fabricated guarantees
+- user-intent satisfaction
+- internal-instruction / hidden-prompt disclosure
 
-### 2. Semantic judge shadow mode
+Required properties:
 
-Add LLM-based evaluation only for expectations that cannot be expressed deterministically, such as unsupported promises, intent satisfaction or internal-instruction disclosure. Judge output must be structured, evidence-backed, explicitly marked semantic and initially non-blocking/shadow-mode.
+- a separate semantic-evaluation interface from `deterministic_tool_contract`
+- explicit opt-in; deterministic runs work with no provider/API key
+- structured result model with verdict, concise reason and relevant assistant-turn evidence
+- bounded prompt/input size and existing masking rules preserved
+- judge timeout/provider failure reported as semantic-evaluation error, never as agent failure
+- provider latency/token/cost metadata when available
+- fake/mock judge adapters in tests; no paid network calls in CI
+- clearly labeled advisory/shadow UI
+- release readiness remains deterministic and unchanged in the first version
 
 ## Definition of good next work
 
-A change is worth shipping when it does at least one of these without weakening inspectability:
+A change is worth shipping when it improves one of these without weakening inspectability:
 
-- catches a real class of agent regression the current engine misses
+- catches a real class of regression the deterministic engine cannot express
 - makes release decisions clearer
-- makes comparisons/history more useful
-- unlocks a second real vertical cleanly
-- improves maintainability or security of the existing product
+- improves comparison/history usefulness
+- proves another vertical without core-domain coupling
+- improves maintainability or security
 
 A large feature that does none of these is out of scope for the MVP.
