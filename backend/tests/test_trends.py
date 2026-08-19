@@ -10,7 +10,6 @@ from app.db.models import Base, ScenarioResultRow
 from app.db.sql_run_store import SqlRunStore
 from app.models import AgentMode
 from app.regression import RegressionStatus
-from app.scenario_packs import ScenarioPackRegistry
 from app.scenario_runner import RunStatus
 from app.scenarios import Severity
 from app.test_runs import RunService
