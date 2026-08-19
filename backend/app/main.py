@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 
 from app.agent_adapters import DemoAgentAdapter
 from app.config import get_settings
+from app.db.engine import create_run_store_engine, enable_run_store_rls
 from app.demo_agent import ConversationNotFoundError, demo_agent_service
 from app.http_agent import (
     ConnectionTestResult,
@@ -51,8 +52,27 @@ logger = logging.getLogger(__name__)
 settings = get_settings()
 
 
+def _harden_persistent_database() -> int:
+    """Apply idempotent database security hardening before serving requests."""
+
+    if not settings.uses_persistent_run_store:
+        return 0
+
+    engine = create_run_store_engine(settings)
+    try:
+        return enable_run_store_rls(engine)
+    finally:
+        engine.dispose()
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    # Keep persistence tables inaccessible through accidental public/Data API
+    # paths even when a platform-side advisor or migration step was missed.
+    hardened = await asyncio.to_thread(_harden_persistent_database)
+    if hardened:
+        logger.info("Verified Row Level Security on %s persistence table(s).", hardened)
+
     # A persisted queued/running run cannot resume without a durable worker
     # queue, so retire anything a previous process left mid-flight instead of
     # leaving permanently "running" zombie records behind.
