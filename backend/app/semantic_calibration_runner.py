@@ -180,7 +180,11 @@ def _stability_for_case(
         for observation in observations
         if observation.case_id == case.id and observation.observed_verdict is not None
     ]
-    counts = Counter(observation.observed_verdict.value for observation in completed if observation.observed_verdict)
+    counts = Counter(
+        observation.observed_verdict.value
+        for observation in completed
+        if observation.observed_verdict
+    )
     stability_rate = (max(counts.values()) / len(completed)) if completed else None
     return CalibrationCaseStability(
         case_id=case.id,
@@ -224,7 +228,12 @@ async def run_semantic_calibration(
                 _build_calibration_request(case),
                 timeout_seconds=timeout_seconds,
             )
-            check = report.checks[0] if report.status is SemanticEvaluationStatus.COMPLETED and len(report.checks) == 1 else None
+            check = (
+                report.checks[0]
+                if report.status is SemanticEvaluationStatus.COMPLETED
+                and len(report.checks) == 1
+                else None
+            )
             if check is None:
                 repetition_complete = False
             else:
@@ -253,10 +262,22 @@ async def run_semantic_calibration(
     attempted = len(cases) * repeats
     completed = sum(observation.observed_verdict is not None for observation in observations)
     complete = completed == attempted and len(repetition_scores) == repeats
-    latencies = [observation.latency_ms for observation in observations if observation.latency_ms is not None]
+    latencies = [
+        observation.latency_ms
+        for observation in observations
+        if observation.latency_ms is not None
+    ]
     sorted_latencies = sorted(latencies)
-    p95_index = max(0, math.ceil(0.95 * len(sorted_latencies)) - 1) if sorted_latencies else 0
-    token_samples = [observation.total_tokens for observation in observations if observation.total_tokens is not None]
+    p95_index = (
+        max(0, math.ceil(0.95 * len(sorted_latencies)) - 1)
+        if sorted_latencies
+        else 0
+    )
+    token_samples = [
+        observation.total_tokens
+        for observation in observations
+        if observation.total_tokens is not None
+    ]
 
     return SemanticCalibrationRunReport(
         provider=judge.provider,
