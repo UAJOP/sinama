@@ -2,7 +2,7 @@
 
 ## Goal
 
-Keep the first implementation simple, inspectable and cheap. SINAMA should prove the evaluation workflow before adding distributed infrastructure.
+Keep SINAMA simple, inspectable and cheap while proving a trustworthy pre-production reliability workflow for customer-service AI agents. Prefer typed, deterministic contracts and evidence over infrastructure or feature count.
 
 ## High-level flow
 
@@ -20,9 +20,11 @@ FastAPI API
    |
    +--> Evaluation Engine
    |      +--> Deterministic validators
-   |      +--> Optional semantic LLM judge
+   |      +--> Optional semantic LLM judge (roadmap)
    |
-   +--> PostgreSQL / Supabase
+   +--> Run Store
+          +--> bounded memory store
+          +--> PostgreSQL
 ```
 
 ## Frontend
@@ -48,43 +50,60 @@ FastAPI owns all privileged operations:
 - tool-call normalization
 - scoring
 - persistence
-- provider API calls
+- future provider API calls
 - secret access
 
-Initial execution can run in-process with async Python. Do not add Redis/Celery until a real workload requires a queue.
+Execution is currently in-process with async Python. Do not add Redis/Celery until a real workload requires a durable queue.
 
-### Implemented scenario execution slice
+### Scenario and tool boundary
 
-The current runner is async and in-process. It depends on an `AgentAdapter` protocol rather than a concrete agent service, applies a configurable timeout to every adapter turn and stops at the fixture's `max_turns` boundary. `DemoAgentAdapter` wraps the deterministic local service, while `HttpAgentAdapter` validates an untrusted destination and normalizes the minimal external turn contract into the same `AgentTurnResult` and `ToolEvent` models.
+The built-in insurance demo owns a small `ToolName` enum (`lookup_policy`, `request_document`, `submit_claim`, etc.). That enum is a demo-domain convenience, not the platform boundary.
+
+External agents and scenario contracts use a validated `ToolReference`: known demo tool names retain their enum representation for backward compatibility, while future verticals may introduce constrained domain-specific identifiers such as `refund_order` or `banking.freeze_card` without editing SINAMA's core tool enum.
+
+Scenario IDs use a stable vertical-prefix format such as `INS-001`, `ECOM-001` or `BANK-001`. Repository-backed scenario fixtures are discovered one directory below `app/scenario_data/`, so a future vertical can add its own directory without changing the loader. Existing insurance-specific synthetic-context fields remain first-class for the demo pack; `SyntheticContext.attributes` provides typed scalar metadata for future domain-specific fixture context without forcing schema churn for every vertical.
+
+### Implemented scenario execution
+
+The runner is async and in-process. It depends on an `AgentAdapter` protocol rather than a concrete agent service, applies a configurable timeout to every adapter turn and stops at the fixture's `max_turns` boundary. `DemoAgentAdapter` wraps the deterministic local service, while `HttpAgentAdapter` validates an untrusted destination and normalizes the minimal external turn contract into the same `AgentTurnResult` and `ToolEvent` models.
 
 The HTTP adapter disables redirects and environment proxies, enforces a bounded total deadline and response size, and validates the literal or every DNS-resolved IPv4/IPv6 address before each turn. Domain requests are pinned to one of those validated public addresses while retaining the original Host header and TLS SNI hostname. Production and Railway runtimes require HTTPS; localhost, non-global network ranges and cloud-metadata destinations are rejected. Connection testing reports timeout, non-2xx, invalid JSON, invalid schema/tool events and security/network failures without returning upstream response bodies or credentials.
 
-Each run returns an ordered user/assistant transcript, the original structured `ToolEvent` trace and deterministic check results. The evaluator receives only the scenario contract and observed trace; agent mode and configuration labels are metadata and cannot influence scoring.
+Each scenario returns an ordered user/assistant transcript, structured `ToolEvent` trace and deterministic check results. The evaluator receives only the scenario contract and observed trace; agent mode and configuration labels are metadata and cannot influence scoring.
 
 The implemented evaluation scope is `deterministic_tool_contract`:
 
-- required tool presence,
-- exact expected tool arguments,
-- forbidden tool absence, and
-- explicit handoff tool/argument contracts.
+- required tool presence
+- exact expected tool arguments
+- forbidden tool absence
+- tool-call-count limits
+- required/forbidden response phrases
+- repeated-response loop detection
+- explicit handoff tool/argument contracts
 
 Argument constraints run only when the corresponding tool event exists. A missing required tool emits one missing-tool failure without cascading argument mismatches; a missing optional tool emits no check.
 
-Fixture `deterministic_checks` IDs are declarative descriptions, not evaluator instructions. They are copied to `declared_checks` and `unscored_declared_checks`; the engine neither parses their names nor infers that an ID was executed. Actual coverage is represented only by checks generated from `expected_tool_calls`, their constraints and `forbidden_tool_calls`. Natural-language outcomes and forbidden behaviors are surfaced as `unscored_expectations` metadata.
+Fixture `deterministic_checks` IDs are declarative descriptions, not evaluator instructions. They are copied to `declared_checks` and `unscored_declared_checks`; the engine neither parses their names nor infers that an ID was executed. Actual coverage is represented only by generated checks. Natural-language outcomes and forbidden behaviors are surfaced as `unscored_expectations` metadata.
 
 Agent-policy failures return `fail`; timeout, malformed response, adapter exception and max-turn failures return `error`.
 
-### Implemented run and inspection slice
+### Run and inspection layer
 
-`ScenarioPackRegistry` defines the stable `insurance-v1` ordering (`INS-001` through `INS-005`) while deriving public metadata from the validated repository fixtures. `RunService` composes the existing runner rather than duplicating evaluation logic. It starts one in-process asyncio task per test run and executes pack scenarios sequentially.
+`ScenarioPackRegistry` defines the stable `insurance-v1` ordering (`INS-001` through `INS-010`) while deriving public metadata from validated repository fixtures. `RunService` composes the existing runner rather than duplicating evaluation logic. It starts one in-process asyncio task per test run and executes pack scenarios sequentially.
 
-`RunStore` is typed, thread-safe and bounded to the latest 20 terminal records. It deep-copies stored/read results so API consumers cannot mutate evidence. Run lifecycle (`queued`, `running`, `completed`, `error`) is independent of scenario outcome (`pass`, `fail`, `error`). Aggregate pass/fail/error counts are derived only from results that have actually been observed; `completed_scenarios` provides progress against the pack total. External endpoint/token configuration is captured only by the active asyncio task factory; the store retains only the non-secret target type and label.
+`RunStore` has two interchangeable implementations. The in-memory store is thread-safe and bounded to recent terminal runs. The SQL store persists complete history, scenario evidence and baseline assignment. Both stores render public API models through shared projection helpers and delegate comparison semantics to `app.regression`, preventing storage-specific scoring drift.
 
-The Next.js `/runs` route uses a client dashboard beneath the shared application layout. API types and requests remain centralized in `frontend/src/lib/api.ts`. Polling is sequential, abortable and bounded after repeated transport failures. Result detail is fetched separately from the summary list and exposes checks, transcript, tool trace and coverage metadata without treating unscored declarations as evaluated.
+Run lifecycle (`queued`, `running`, `completed`, `error`) is independent of scenario outcome (`pass`, `fail`, `error`). Aggregate pass/fail/error counts are derived only from observed results; `completed_scenarios` separately reports progress.
+
+Runs may carry optional user-supplied `agent_version` metadata. Any completed run can become a pack baseline, and compatible completed runs can also be compared explicitly without changing the baseline assignment. Comparison output includes run-level score delta, per-metric deltas and New / Resolved / Persistent failure sets.
+
+External endpoint/token configuration is captured only by the active task factory. The store persists only non-secret target/label/version metadata; bearer tokens are never written to run history.
+
+The Next.js `/runs` route currently owns configuration, polling, recent history, result inspection and comparison views. Its behavior is correct but the dashboard has grown large enough that future trends/suites/readiness work should first extract focused components/hooks rather than keep extending one client component.
 
 ## Core domain objects
 
-### AgentConfig
+### AgentConfig direction
 
 - id
 - name
@@ -94,41 +113,43 @@ The Next.js `/runs` route uses a client dashboard beneath the shared application
 - timeout_seconds
 - optional request template/config
 
-Secrets must be referenced from server-side configuration rather than stored in scenario JSON.
+Saved agent configurations are roadmap work. Secrets must be referenced from server-side configuration rather than stored in scenario JSON.
 
 ### Scenario
 
-- id
-- title
-- category
+- stable prefixed id
+- semantic version
+- title/category/difficulty/tags
 - persona
-- initial_user_goal
-- max_turns
-- expected_outcomes
-- expected_tool_calls
-- forbidden_behaviors
-- severity_if_failed
+- initial user goal
+- synthetic/hidden context
+- max turns
+- scripted user turns
+- expected/forbidden tool contracts
+- response phrase / loop constraints
+- expected and forbidden behaviors
+- severity if failed
 
 ### TestRun
 
-- id
-- agent_config_id
-- scenario_pack/version
-- status
-- started_at
-- completed_at
-- aggregate metrics
+- run id
+- pack snapshot
+- agent target/mode/label/version
+- lifecycle status
+- timestamps
+- aggregate counts
+- baseline flag
 
 ### ScenarioResult
 
-- scenario_id
-- test_run_id
-- status
+- scenario id/version
+- status/severity
 - transcript
-- tool_trace
-- evaluator_results
-- latency metadata
-- token/cost metadata when available
+- tool trace
+- deterministic checks
+- structured failures
+- metric breakdown
+- execution error when applicable
 
 ## Evaluation strategy
 
@@ -136,47 +157,55 @@ Use deterministic checks first:
 
 - expected tool was called
 - forbidden tool was not called
-- required parameter exists
-- parameter matches expected schema/value constraints
-- handoff event occurred when required
-- response contains/does not contain known policy statements where exact rules apply
+- exact required parameter/value is present
+- a tool is not called more than an allowed count
+- handoff occurred when required
+- exact response phrases are present/absent where the rule is deterministic
+- the conversation is not stuck in a repeated-response loop
+
+The next deterministic layer should add richer structured rules such as ordering/preconditions, existence, one-of, regex and numeric constraints before relying on a paid judge.
 
 Use semantic evaluation only for judgments such as:
 
 - did the response answer the user's intent?
 - did the agent make an unsupported promise?
-- was the tone acceptable under an angry-user scenario?
+- did it expose internal instructions?
+- was the tone acceptable under a difficult-user scenario?
 
-LLM judge output must be structured and include a short reason. Never treat one judge call as perfect ground truth.
+A future LLM judge must be additive evidence, structured and auditable. It should initially run in shadow mode rather than silently replacing deterministic release gates.
 
 ## Persistence
 
-Scenarios stay repository-backed fixtures. Run history sits behind a single `RunStore` protocol with two implementations, selected by `SINAMA_RUN_STORE_BACKEND`:
+Scenarios stay repository-backed fixtures. Run history sits behind one `RunStore` protocol selected by `SINAMA_RUN_STORE_BACKEND`:
 
-- `memory` (default) — bounded single-process store keeping the latest 20 terminal runs. No database is required to develop, test or demo, and nothing survives a restart.
-- `postgres` — SQLAlchemy 2.x + psycopg 3 against PostgreSQL, compatible with Supabase through a standard connection string. Deliberately no Supabase SDK or REST coupling.
+- `memory` (default) — bounded single-process store. No database is required and nothing survives a restart.
+- `postgres` — SQLAlchemy 2.x + psycopg 3 against standard PostgreSQL, including Supabase-compatible connection strings. SINAMA deliberately has no Supabase SDK/REST coupling.
 
 Both backends render API models through the same projection helpers in `app/test_runs.py`, and both delegate regression scoring to `build_comparison()`. Neither backend owns evaluation logic.
 
-### Schema
+### Schema and database hardening
 
-Three tables, created only by Alembic (`alembic upgrade head`); the application never issues DDL at startup.
+Application schema creation and evolution are owned by Alembic (`alembic upgrade head`). The runtime does not create tables or perform schema migrations.
 
-- `test_runs` — run identity, lifecycle timestamps, agent target/mode/label, orchestration error, and a **snapshot of the scenario pack as executed**. Regression compatibility is judged against that snapshot, not against a fixture a later deployment may have changed.
-- `scenario_results` — one row per scenario result, ordered by an explicit `position`. The typed `ScenarioRunResult` is stored as a JSON document (JSONB on PostgreSQL) rather than shredded into per-check columns, because nothing queries inside a result. `scenario_id` and `status` are duplicated into columns so run aggregates and single-scenario lookup avoid deserializing transcripts.
-- `run_baselines` — `pack_id` as the primary key, which is what enforces one baseline per pack. Reassignment replaces the row inside one transaction.
+When the PostgreSQL run store is enabled, startup additionally applies an idempotent security hardening step that enables Row Level Security on the known persistence tables if they exist. That narrow `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` operation is intentionally separate from schema migration: it protects against accidental direct/public data access while the trusted server-side database owner connection remains the application path.
 
-Persisted payloads are re-validated through the Pydantic models on read; an incompatible payload raises a typed error rather than leaking internals.
+Current tables:
+
+- `test_runs` — run identity, lifecycle timestamps, agent target/mode/label/version, orchestration error and a **snapshot of the scenario pack as executed**
+- `scenario_results` — one row per scenario result, ordered by explicit `position`; the typed result is stored as JSON/JSONB with `scenario_id` and `status` duplicated for real queries
+- `run_baselines` — one baseline row per `pack_id`
+
+Persisted payloads are re-validated through Pydantic models on read; incompatible/corrupt payloads fail through typed errors rather than being trusted as arbitrary JSON.
 
 ### Concurrency and restarts
 
-The store interface is synchronous. FastAPI already runs `def` endpoints in a threadpool, and `RunService` wraps every store call in `asyncio.to_thread`, so database I/O never blocks the scenario-execution event loop.
+The store interface is synchronous. FastAPI runs `def` endpoints in a threadpool, and `RunService` wraps store operations in `asyncio.to_thread`, so SQL I/O does not block scenario execution.
 
-SINAMA has no durable worker queue, so a `queued`/`running` run left behind by a dead process can never make progress. On startup the PostgreSQL store retires those rows to `error` with a generic service-interruption reason. Automatic resume is deliberately out of scope.
+SINAMA has no durable worker queue. A persisted `queued`/`running` run left behind by a dead process cannot resume, so startup retires it to `error` with a generic service-interruption reason. Automatic resume remains deliberately out of scope.
 
 ### Secrets
 
-External-agent bearer tokens are never persisted — only the non-secret agent target and label reach storage. The database URL is a `SecretStr`, validation errors are configured not to echo input, and the engine is built with `hide_parameters=True` so statement parameters (which carry transcripts) never reach logs.
+External-agent bearer tokens are never persisted. The database URL is a `SecretStr`, validation errors hide raw input, and SQLAlchemy is configured with `hide_parameters=True` so statement parameters carrying transcripts do not appear in logs.
 
 ## Implemented API surface
 
@@ -195,20 +224,38 @@ External-agent bearer tokens are never persisted — only the non-secret agent t
 
 The run summary/result-detail split keeps list payloads compact while making full evidence inspectable on demand.
 
+## Quality gate
+
+Pull requests and pushes to integration/stable branches run GitHub Actions for:
+
+- backend: `pytest`, `ruff check app tests`, `mypy app`
+- frontend: `pnpm lint`, `pnpm typecheck`, `pnpm build`
+
+The CI definition is the source of truth for quality status; documentation should not hard-code a test-count badge that becomes stale as coverage grows.
+
 ## Cost controls
 
-- local mock agent by default
+- local deterministic mock agent by default
 - deterministic evaluators by default
-- explicit opt-in for paid LLM evaluation
-- scenario/run limits in development
-- store token/cost metadata when provider usage is enabled
+- explicit opt-in for future paid LLM evaluation
+- bounded scenario/run behavior in development
+- no Redis/Celery/Kafka until execution volume justifies it
+
+## Next architecture steps
+
+1. extract the oversized `/runs` dashboard into focused components/hooks without redesigning it
+2. add richer deterministic argument/order/precondition rules
+3. expose version-aware trend rollups from persisted runs
+4. compute an evidence-backed release-readiness verdict
+5. add multi-pack/test-suite composition and a second vertical pack
+6. add a semantic judge in shadow mode for genuinely semantic expectations
 
 ## Later, not now
 
-- Redis worker queue
+- durable distributed worker queue
 - realtime streaming infrastructure
-- multi-tenant organizations
-- RBAC / enterprise auth
+- multi-tenant organizations / RBAC
+- billing
 - voice simulation
 - production traffic ingestion
 - plugin marketplace

@@ -5,7 +5,7 @@ from typing import Literal, Protocol
 
 from pydantic import Field
 
-from app.models import JsonScalar, StrictModel, ToolEvent, ToolName
+from app.models import JsonScalar, StrictModel, ToolEvent, ToolName, ToolReference
 from app.scenarios import Scenario, Severity
 
 
@@ -35,7 +35,7 @@ class EvaluationCategory(StrEnum):
 
 
 class EvaluationEvidence(StrictModel):
-    expected_tool: ToolName | None = None
+    expected_tool: ToolReference | None = None
     argument_name: str | None = None
     expected_value: JsonScalar = None
     actual_values: list[JsonScalar] = Field(default_factory=list)
@@ -90,7 +90,7 @@ class DeterministicToolEvaluator:
         tool_trace: list[ToolEvent],
         assistant_messages: Sequence[str] = (),
     ) -> EvaluationReport:
-        events_by_tool: dict[ToolName, list[ToolEvent]] = defaultdict(list)
+        events_by_tool: dict[ToolReference, list[ToolEvent]] = defaultdict(list)
         for event in tool_trace:
             events_by_tool[event.tool].append(event)
 
@@ -133,9 +133,9 @@ class DeterministicToolEvaluator:
                 )
             )
 
-        # --- Scenario Engine V2: opt-in checks, only emitted when a fixture declares them ---
         for index, (tool, max_count) in enumerate(
-            sorted(scenario.max_tool_call_counts.items()), start=1
+            sorted(scenario.max_tool_call_counts.items(), key=lambda item: str(item[0])),
+            start=1,
         ):
             checks.append(
                 self._tool_call_count_check(
@@ -167,8 +167,6 @@ class DeterministicToolEvaluator:
             status=EvaluationStatus.FAIL if failed else EvaluationStatus.PASS,
             severity=scenario.severity_if_failed if failed else None,
             checks=checks,
-            # These fixture IDs are descriptive metadata, not executable configuration.
-            # Do not infer coverage from their names; structured contracts drive scoring.
             declared_checks=list(scenario.deterministic_checks),
             unscored_declared_checks=list(scenario.deterministic_checks),
             unscored_expectations=[
@@ -180,32 +178,32 @@ class DeterministicToolEvaluator:
 
     @staticmethod
     def _required_tool_check(
-        tool: ToolName,
+        tool: ToolReference,
         events: list[ToolEvent],
         failure_severity: Severity,
         index: int,
     ) -> EvaluationCheckResult:
         if events:
             return EvaluationCheckResult(
-                check_id=f"required_tool:{index}:{tool.value}",
+                check_id=f"required_tool:{index}:{tool}",
                 type=EvaluationCheckType.REQUIRED_TOOL_CALL,
                 status=EvaluationStatus.PASS,
-                reason=f"Required tool {tool.value} was called.",
+                reason=f"Required tool {tool} was called.",
                 evidence=EvaluationEvidence(expected_tool=tool, matching_event=events[0]),
             )
         return EvaluationCheckResult(
-            check_id=f"required_tool:{index}:{tool.value}",
+            check_id=f"required_tool:{index}:{tool}",
             type=EvaluationCheckType.REQUIRED_TOOL_CALL,
             status=EvaluationStatus.FAIL,
             category=EvaluationCategory.REQUIRED_TOOL_MISSING,
             severity=failure_severity,
-            reason=f"Required tool {tool.value} was not called.",
+            reason=f"Required tool {tool} was not called.",
             evidence=EvaluationEvidence(expected_tool=tool),
         )
 
     @staticmethod
     def _argument_check(
-        tool: ToolName,
+        tool: ToolReference,
         argument_name: str,
         expected_value: JsonScalar,
         events: list[ToolEvent],
@@ -230,31 +228,26 @@ class DeterministicToolEvaluator:
         )
         if matching_event is not None:
             return EvaluationCheckResult(
-                check_id=f"tool_argument:{index}:{tool.value}:{argument_name}",
+                check_id=f"tool_argument:{index}:{tool}:{argument_name}",
                 type=EvaluationCheckType.TOOL_ARGUMENT_CONSTRAINT,
                 status=EvaluationStatus.PASS,
-                reason=(
-                    f"Tool {tool.value} used expected {argument_name}={expected_value!r}."
-                ),
+                reason=f"Tool {tool} used expected {argument_name}={expected_value!r}.",
                 evidence=evidence,
             )
         return EvaluationCheckResult(
-            check_id=f"tool_argument:{index}:{tool.value}:{argument_name}",
+            check_id=f"tool_argument:{index}:{tool}:{argument_name}",
             type=EvaluationCheckType.TOOL_ARGUMENT_CONSTRAINT,
             status=EvaluationStatus.FAIL,
             category=EvaluationCategory.TOOL_ARGUMENT_MISMATCH,
             severity=failure_severity,
-            reason=(
-                f"Tool {tool.value} did not use expected "
-                f"{argument_name}={expected_value!r}."
-            ),
+            reason=f"Tool {tool} did not use expected {argument_name}={expected_value!r}.",
             evidence=evidence,
         )
 
     @staticmethod
     def _forbidden_tool_check(
         scenario: Scenario,
-        tool: ToolName,
+        tool: ToolReference,
         condition: str,
         events: list[ToolEvent],
         index: int,
@@ -266,17 +259,17 @@ class DeterministicToolEvaluator:
         )
         if not events:
             return EvaluationCheckResult(
-                check_id=f"forbidden_tool:{index}:{tool.value}",
+                check_id=f"forbidden_tool:{index}:{tool}",
                 type=EvaluationCheckType.FORBIDDEN_TOOL_CALL,
                 status=EvaluationStatus.PASS,
-                reason=f"Forbidden tool {tool.value} was not called.",
+                reason=f"Forbidden tool {tool} was not called.",
                 evidence=evidence,
             )
 
-        reason = f"Forbidden tool {tool.value} was called."
+        reason = f"Forbidden tool {tool} was called."
         required_document = scenario.synthetic_context.required_document
         if (
-            tool is ToolName.SUBMIT_CLAIM
+            tool == ToolName.SUBMIT_CLAIM
             and required_document is not None
             and scenario.synthetic_context.document_available is False
         ):
@@ -284,7 +277,7 @@ class DeterministicToolEvaluator:
                 f"submit_claim was called before required {required_document} was collected"
             )
         return EvaluationCheckResult(
-            check_id=f"forbidden_tool:{index}:{tool.value}",
+            check_id=f"forbidden_tool:{index}:{tool}",
             type=EvaluationCheckType.FORBIDDEN_TOOL_CALL,
             status=EvaluationStatus.FAIL,
             category=EvaluationCategory.TOOL_CALL_POLICY_VIOLATION,
@@ -295,7 +288,7 @@ class DeterministicToolEvaluator:
 
     @staticmethod
     def _tool_call_count_check(
-        tool: ToolName,
+        tool: ToolReference,
         max_count: int,
         events: list[ToolEvent],
         failure_severity: Severity,
@@ -310,25 +303,19 @@ class DeterministicToolEvaluator:
         )
         if count <= max_count:
             return EvaluationCheckResult(
-                check_id=f"tool_call_count:{index}:{tool.value}",
+                check_id=f"tool_call_count:{index}:{tool}",
                 type=EvaluationCheckType.TOOL_CALL_COUNT,
                 status=EvaluationStatus.PASS,
-                reason=(
-                    f"Tool {tool.value} was called {count} time(s), within the allowed "
-                    f"{max_count}."
-                ),
+                reason=f"Tool {tool} was called {count} time(s), within the allowed {max_count}.",
                 evidence=evidence,
             )
         return EvaluationCheckResult(
-            check_id=f"tool_call_count:{index}:{tool.value}",
+            check_id=f"tool_call_count:{index}:{tool}",
             type=EvaluationCheckType.TOOL_CALL_COUNT,
             status=EvaluationStatus.FAIL,
             category=EvaluationCategory.EXCESSIVE_TOOL_CALLS,
             severity=failure_severity,
-            reason=(
-                f"Tool {tool.value} was called {count} time(s), exceeding the allowed "
-                f"{max_count}."
-            ),
+            reason=f"Tool {tool} was called {count} time(s), exceeding the allowed {max_count}.",
             evidence=evidence,
         )
 

@@ -21,7 +21,7 @@ from app.agent_adapters import (
     MalformedAgentResponseError,
 )
 from app.config import get_settings
-from app.models import JsonScalar, NonEmptyMessage, StrictModel, ToolEvent, ToolName
+from app.models import JsonScalar, NonEmptyMessage, StrictModel, ToolEvent, ToolReference
 
 EndpointUrl = Annotated[
     str,
@@ -58,7 +58,9 @@ class ExternalAgentConfiguration(StrictModel):
 
 
 class ExternalToolEvent(StrictModel):
-    tool: ToolName
+    # External agents may expose domain-specific tools. Known demo tools retain
+    # their enum representation for backward compatibility.
+    tool: ToolReference
     arguments: dict[str, JsonScalar] = Field(default_factory=dict, max_length=50)
 
 
