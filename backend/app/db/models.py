@@ -3,11 +3,10 @@
 Design notes:
 
 - Typed Pydantic models stay the authoritative data contract. Result payloads are
-  stored as JSON documents rather than being shredded into per-check columns,
-  because nothing in the product queries *inside* a result - it reads whole runs.
-- The few columns that are duplicated out of those payloads (`scenario_id`,
-  `status`) exist to answer real queries without deserializing transcripts: run
-  aggregates and single-scenario lookup.
+  stored as JSON documents rather than being shredded into per-check columns.
+- Columns duplicated out of those payloads exist only for real product queries
+  that must not deserialize transcripts: status polling, trend score/severity
+  rollups and critical-regression detection.
 - This module describes the *current* schema only. Alembic revisions are frozen
   historical snapshots that declare their own column types inline and import
   nothing from here, so editing a model can never retroactively change what an
@@ -32,12 +31,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
-# JSONB on PostgreSQL; portable JSON elsewhere so the same store code can be
-# exercised against SQLite in the default test suite.
 JsonPayload = JSON().with_variant(JSONB(), "postgresql")
-
-# Timezone-aware everywhere. SQLite cannot store an offset, so reads are
-# normalized back to UTC in `app.db.sql_run_store`.
 Timestamp = DateTime(timezone=True)
 
 PACK_ID_LENGTH = 128
@@ -57,14 +51,10 @@ class TestRunRow(Base):
     run_id: Mapped[UUID] = mapped_column(Uuid(), primary_key=True)
     pack_id: Mapped[str] = mapped_column(String(PACK_ID_LENGTH), nullable=False)
     pack_name: Mapped[str] = mapped_column(String(LABEL_LENGTH), nullable=False)
-    # Snapshot of the pack as executed. Regression compatibility must be judged
-    # against what the run actually ran, not against a fixture that a later
-    # deployment may have changed.
     pack_snapshot: Mapped[dict[str, Any]] = mapped_column(JsonPayload, nullable=False)
     agent_target: Mapped[str] = mapped_column(String(STATUS_LENGTH), nullable=False)
     agent_mode: Mapped[str] = mapped_column(String(LABEL_LENGTH), nullable=False)
     agent_label: Mapped[str] = mapped_column(String(LABEL_LENGTH), nullable=False)
-    # Optional user metadata, distinct from the SINAMA-derived agent_label.
     agent_version: Mapped[str | None] = mapped_column(
         String(AGENT_VERSION_LENGTH), nullable=True
     )
@@ -75,10 +65,9 @@ class TestRunRow(Base):
     error: Mapped[dict[str, Any] | None] = mapped_column(JsonPayload, nullable=True)
 
     __table_args__ = (
-        # Recent-history listing: newest first, with run_id as a stable tiebreak.
         Index("ix_test_runs_created_at", "created_at", "run_id"),
-        # Startup recovery scans for non-terminal runs.
         Index("ix_test_runs_lifecycle_status", "lifecycle_status"),
+        Index("ix_test_runs_pack_created_at", "pack_id", "created_at", "run_id"),
     )
 
 
@@ -91,11 +80,14 @@ class ScenarioResultRow(Base):
         ForeignKey("test_runs.run_id", ondelete="CASCADE"),
         nullable=False,
     )
-    # Execution order within the pack. Explicit so result ordering never depends
-    # on primary-key generation or row-return order.
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     scenario_id: Mapped[str] = mapped_column(String(SCENARIO_ID_LENGTH), nullable=False)
     status: Mapped[str] = mapped_column(String(STATUS_LENGTH), nullable=False)
+    # Queryable trend metadata, deliberately kept small and derived from the
+    # authoritative typed payload when the result is written.
+    severity: Mapped[str | None] = mapped_column(String(STATUS_LENGTH), nullable=True)
+    goal_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    critical_failure_keys: Mapped[list[str] | None] = mapped_column(JsonPayload, nullable=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JsonPayload, nullable=False)
 
     __table_args__ = (
@@ -107,7 +99,6 @@ class ScenarioResultRow(Base):
 class RunBaselineRow(Base):
     __tablename__ = "run_baselines"
 
-    # pack_id as the primary key is what enforces "one baseline per pack".
     pack_id: Mapped[str] = mapped_column(String(PACK_ID_LENGTH), primary_key=True)
     run_id: Mapped[UUID] = mapped_column(
         Uuid(),
