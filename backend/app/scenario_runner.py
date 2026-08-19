@@ -14,6 +14,7 @@ from app.agent_adapters import (
     AgentTurnResult,
     MalformedAgentResponseError,
 )
+from app.config import get_settings
 from app.evaluator import (
     DeterministicToolEvaluator,
     EvaluationCheckResult,
@@ -25,6 +26,14 @@ from app.masking import mask_sensitive_text
 from app.metrics import MetricScore, compute_metrics
 from app.models import StrictModel, ToolEvent
 from app.scenarios import Scenario, Severity
+from app.semantic_judge import (
+    SemanticEvaluationReport,
+    SemanticJudge,
+    SemanticJudgeRequest,
+    SemanticTranscriptTurn,
+    run_semantic_shadow,
+)
+from app.semantic_judge_factory import build_semantic_judge
 
 logger = logging.getLogger(__name__)
 
@@ -75,12 +84,23 @@ class ScenarioRunResult(StrictModel):
     unscored_expectations: list[str] = Field(default_factory=list)
     metrics: list[MetricScore] = Field(default_factory=list)
     failures: list[Failure] = Field(default_factory=list)
+    # Additive field keeps historical persisted results valid while exposing
+    # optional advisory semantic evidence on newly evaluated scenarios.
+    semantic_evaluation: SemanticEvaluationReport | None = None
     error: ScenarioExecutionError | None = None
 
 
 class ScenarioRunner:
-    def __init__(self, evaluator: ScenarioEvaluator | None = None) -> None:
+    def __init__(
+        self,
+        evaluator: ScenarioEvaluator | None = None,
+        *,
+        semantic_judge: SemanticJudge | None = None,
+        semantic_timeout_seconds: float = 8.0,
+    ) -> None:
         self._evaluator = evaluator or DeterministicToolEvaluator()
+        self._semantic_judge = semantic_judge
+        self._semantic_timeout_seconds = semantic_timeout_seconds
 
     async def run(
         self,
@@ -250,7 +270,11 @@ class ScenarioRunner:
         masked_tool_trace = [self._mask_tool_event(event) for event in tool_trace]
         masked_by_id = {event.id: event for event in masked_tool_trace}
         masked_checks = [self._mask_check(check, masked_by_id) for check in report.checks]
+        semantic_evaluation = await self._semantic_evaluation(scenario, masked_transcript)
 
+        # Semantic evaluation is intentionally computed only after all deterministic
+        # status/severity/metrics/failures have been finalized. Its verdict cannot
+        # alter the authoritative deterministic result in shadow mode.
         return ScenarioRunResult(
             scenario_id=scenario.id,
             scenario_version=scenario.version,
@@ -270,6 +294,37 @@ class ScenarioRunner:
             tool_trace=masked_tool_trace,
             turns_executed=turns_executed,
             unscored_expectations=report.unscored_expectations,
+            semantic_evaluation=semantic_evaluation,
+        )
+
+    async def _semantic_evaluation(
+        self,
+        scenario: Scenario,
+        masked_transcript: list[TranscriptTurn],
+    ) -> SemanticEvaluationReport | None:
+        if not scenario.semantic_expectations:
+            return None
+        if self._semantic_judge is None:
+            return SemanticEvaluationReport.disabled()
+
+        request = SemanticJudgeRequest(
+            scenario_id=scenario.id,
+            scenario_title=scenario.title,
+            initial_user_goal=mask_sensitive_text(scenario.initial_user_goal),
+            expectations=scenario.semantic_expectations,
+            transcript=[
+                SemanticTranscriptTurn(
+                    sequence=turn.sequence,
+                    role=turn.role.value,
+                    content=turn.content,
+                )
+                for turn in masked_transcript
+            ],
+        )
+        return await run_semantic_shadow(
+            self._semantic_judge,
+            request,
+            timeout_seconds=self._semantic_timeout_seconds,
         )
 
     @staticmethod
@@ -337,4 +392,8 @@ class ScenarioRunner:
         )
 
 
-scenario_runner = ScenarioRunner()
+_runtime_settings = get_settings()
+scenario_runner = ScenarioRunner(
+    semantic_judge=build_semantic_judge(_runtime_settings),
+    semantic_timeout_seconds=_runtime_settings.semantic_judge_timeout_seconds,
+)
