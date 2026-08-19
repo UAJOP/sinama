@@ -93,7 +93,8 @@ ECOMMERCE_PACK_V1 = ScenarioPackDefinition(
     name="E-commerce Reliability Pack v1",
     description=(
         "Four hand-reviewed Turkish e-commerce scenarios covering refund ordering, "
-        "failed order lookup recovery, escalation and duplicate-refund prevention."
+        "failed order lookup recovery, escalation and duplicate-refund prevention. "
+        "Requires an external HTTP agent."
     ),
     scenario_ids=("ECOM-001", "ECOM-002", "ECOM-003", "ECOM-004"),
     # The built-in demo models insurance only. E-commerce is intentionally an
@@ -107,7 +108,7 @@ CUSTOMER_SERVICE_CORE_V1 = TestSuiteDefinition(
     name="Customer Service Core Suite v1",
     description=(
         "Cross-vertical suite composing the insurance and e-commerce reliability packs "
-        "for agents that intentionally support both workflows."
+        "for agents that intentionally support both workflows. Requires an external HTTP agent."
     ),
     pack_ids=("insurance-v1", "ecommerce-v1"),
 )
@@ -157,6 +158,22 @@ class ScenarioPackRegistry:
     def list_suites(self) -> list[TestSuiteSummary]:
         return [self._suite_summary(definition) for definition in self._suite_definitions.values()]
 
+    def list_collections(self) -> list[ScenarioPackSummary]:
+        """Compatibility view consumed by the existing run selector.
+
+        First-class suite metadata still lives at `/api/test-suites`; this flat
+        collection view lets old pack-oriented clients select suites without a
+        breaking request/response redesign.
+        """
+
+        return [
+            *self.list_packs(),
+            *(
+                self._suite_execution_summary(definition)
+                for definition in self._suite_definitions.values()
+            ),
+        ]
+
     def get_pack(self, pack_id: str) -> ScenarioPackSummary:
         try:
             definition = self._definitions[pack_id]
@@ -178,12 +195,10 @@ class ScenarioPackRegistry:
             return self._suite_execution_summary(self._suite_definitions[collection_id])
         raise ScenarioCollectionNotFoundError(collection_id)
 
-    def load_scenarios(self, pack_id: str) -> list[Scenario]:
-        try:
-            definition = self._definitions[pack_id]
-        except KeyError as error:
-            raise ScenarioPackNotFoundError(pack_id) from error
-        return self._load_pack_scenarios(definition)
+    def load_scenarios(self, collection_id: str) -> list[Scenario]:
+        """Backward-compatible alias that now resolves either a pack or suite."""
+
+        return self.load_collection_scenarios(collection_id)
 
     def load_collection_scenarios(self, collection_id: str) -> list[Scenario]:
         if collection_id in self._definitions:
