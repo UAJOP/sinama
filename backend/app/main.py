@@ -26,6 +26,7 @@ from app.models import (
     HealthResponse,
     SendMessageRequest,
 )
+from app.readiness import ReleaseReadinessResponse, build_release_readiness
 from app.regression import RegressionComparisonResponse
 from app.scenario_packs import (
     ScenarioPackNotFoundError,
@@ -41,6 +42,7 @@ from app.test_runs import (
     InvalidRunAgentConfigurationError,
     RunNotCompletedError,
     ScenarioResultNotFoundError,
+    TestRunLifecycleStatus,
     TestRunNotFoundError,
     TestRunResultsResponse,
     TestRunSummary,
@@ -311,6 +313,28 @@ def get_test_run_result(run_id: UUID, scenario_id: str) -> ScenarioRunResult:
         raise HTTPException(status_code=404, detail="Test run not found") from error
     except ScenarioResultNotFoundError as error:
         raise HTTPException(status_code=404, detail="Scenario result not found") from error
+
+
+@app.get(
+    "/api/runs/{run_id}/readiness",
+    response_model=ReleaseReadinessResponse,
+    tags=["test-runs"],
+)
+def get_test_run_readiness(run_id: UUID) -> ReleaseReadinessResponse:
+    try:
+        run = run_store.get_run(run_id)
+        result_summaries = run_store.get_results(run_id).results
+        results = [
+            run_store.get_result(run_id, result.scenario_id) for result in result_summaries
+        ]
+        comparison_response = (
+            run_store.get_comparison(run_id)
+            if run.lifecycle_status is TestRunLifecycleStatus.COMPLETED
+            else None
+        )
+        return build_release_readiness(run, results, comparison_response)
+    except TestRunNotFoundError as error:
+        raise HTTPException(status_code=404, detail="Test run not found") from error
 
 
 @app.post(
