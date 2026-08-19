@@ -4,6 +4,7 @@ import Image from "next/image";
 
 import type { RegressionComparisonResponse, TestRunSummary } from "@/lib/api";
 
+import { RunReadiness } from "./run-readiness";
 import styles from "./runs.module.css";
 import {
   LIFECYCLE_LABELS,
@@ -150,97 +151,102 @@ export function RunOverview({
           status: comparisonResponse.comparison.status,
         }
       : null;
+  const readinessRunId =
+    run.lifecycle_status === "completed" || run.lifecycle_status === "error" ? run.run_id : null;
 
   return (
-    <section className={styles.overview} aria-labelledby="run-overview-title">
-      <div className={styles.runIdentity}>
-        <div>
-          <p className="eyebrow">RUN</p>
-          <h2 id="run-overview-title">{run.pack_name}</h2>
-          <code>{run.run_id}</code>
-        </div>
-        <div className={styles.overviewBadges}>
-          {regressionBadge && (
-            <span className={`${styles.regressionBadge} ${styles[regressionBadge.status]}`}>
-              {regressionBadge.label}
-            </span>
-          )}
-          <span className={`${styles.lifecycle} ${styles[run.lifecycle_status]}`}>
-            <i aria-hidden="true" /> {LIFECYCLE_LABELS[run.lifecycle_status]}
-          </span>
-        </div>
-      </div>
-
-      <div className={styles.progressCopy}>
-        <span>
-          {run.completed_scenarios} / {run.total_scenarios} scenarios observed
-        </span>
-        <span>{progressPercent}%</span>
-      </div>
-      <div
-        className={styles.progressTrack}
-        role="progressbar"
-        aria-valuemin={0}
-        aria-valuemax={run.total_scenarios}
-        aria-valuenow={run.completed_scenarios}
-        aria-label="Run progress"
-      >
-        <span style={{ width: `${progressPercent}%` }} />
-      </div>
-
-      <div className={styles.aggregateGrid}>
-        {aggregateCards.map((card) => (
-          <div className={`${styles.aggregateCard} ${styles[card.tone]}`} key={card.label}>
-            <span>
-              <i aria-hidden="true">{card.icon}</i>
-              {card.label}
-            </span>
-            <strong>{card.value}</strong>
+    <>
+      <section className={styles.overview} aria-labelledby="run-overview-title">
+        <div className={styles.runIdentity}>
+          <div>
+            <p className="eyebrow">RUN</p>
+            <h2 id="run-overview-title">{run.pack_name}</h2>
+            <code>{run.run_id}</code>
           </div>
-        ))}
-      </div>
-      <div className={styles.runMeta}>
-        <span>
-          TARGET{" "}
-          <strong>{run.agent_target === "external_http" ? "External HTTP" : "Built-in Demo"}</strong>
-        </span>
-        {run.agent_target === "built_in_demo" && (
+          <div className={styles.overviewBadges}>
+            {regressionBadge && (
+              <span className={`${styles.regressionBadge} ${styles[regressionBadge.status]}`}>
+                {regressionBadge.label}
+              </span>
+            )}
+            <span className={`${styles.lifecycle} ${styles[run.lifecycle_status]}`}>
+              <i aria-hidden="true" /> {LIFECYCLE_LABELS[run.lifecycle_status]}
+            </span>
+          </div>
+        </div>
+
+        <div className={styles.progressCopy}>
           <span>
-            MODE <strong>{run.agent_mode === "healthy" ? "Healthy" : "Broken"}</strong>
+            {run.completed_scenarios} / {run.total_scenarios} scenarios observed
           </span>
-        )}
-        <span>
-          PACK <strong>{run.pack_id}</strong>
-        </span>
-        {run.agent_version && (
+          <span>{progressPercent}%</span>
+        </div>
+        <div
+          className={styles.progressTrack}
+          role="progressbar"
+          aria-valuemin={0}
+          aria-valuemax={run.total_scenarios}
+          aria-valuenow={run.completed_scenarios}
+          aria-label="Run progress"
+        >
+          <span style={{ width: `${progressPercent}%` }} />
+        </div>
+
+        <div className={styles.aggregateGrid}>
+          {aggregateCards.map((card) => (
+            <div className={`${styles.aggregateCard} ${styles[card.tone]}`} key={card.label}>
+              <span>
+                <i aria-hidden="true">{card.icon}</i>
+                {card.label}
+              </span>
+              <strong>{card.value}</strong>
+            </div>
+          ))}
+        </div>
+        <div className={styles.runMeta}>
           <span>
-            VERSION <strong>{run.agent_version}</strong>
+            TARGET{" "}
+            <strong>{run.agent_target === "external_http" ? "External HTTP" : "Built-in Demo"}</strong>
           </span>
-        )}
-        <span>
-          OUTCOMES <strong>Observed results only</strong>
-        </span>
-        <span className={styles.baselineAction}>
-          {run.is_baseline ? (
-            <span className={styles.baselineState}>Baseline</span>
-          ) : (
-            <button
-              type="button"
-              className={styles.baselineButton}
-              onClick={onSetBaseline}
-              disabled={run.lifecycle_status !== "completed" || isSettingBaseline}
-            >
-              {isSettingBaseline ? "Setting…" : "Set as baseline"}
-            </button>
+          {run.agent_target === "built_in_demo" && (
+            <span>
+              MODE <strong>{run.agent_mode === "healthy" ? "Healthy" : "Broken"}</strong>
+            </span>
           )}
-        </span>
-      </div>
-      {baselineError && (
-        <p className={styles.baselineError} role="alert">
-          {baselineError}
-        </p>
-      )}
-    </section>
+          <span>
+            PACK <strong>{run.pack_id}</strong>
+          </span>
+          {run.agent_version && (
+            <span>
+              VERSION <strong>{run.agent_version}</strong>
+            </span>
+          )}
+          <span>
+            OUTCOMES <strong>Observed results only</strong>
+          </span>
+          <span className={styles.baselineAction}>
+            {run.is_baseline ? (
+              <span className={styles.baselineState}>Baseline</span>
+            ) : (
+              <button
+                type="button"
+                className={styles.baselineButton}
+                onClick={onSetBaseline}
+                disabled={run.lifecycle_status !== "completed" || isSettingBaseline}
+              >
+                {isSettingBaseline ? "Setting…" : "Set as baseline"}
+              </button>
+            )}
+          </span>
+        </div>
+        {baselineError && (
+          <p className={styles.baselineError} role="alert">
+            {baselineError}
+          </p>
+        )}
+      </section>
+      <RunReadiness runId={readinessRunId} reloadKey={run.is_baseline ? 1 : 0} />
+    </>
   );
 }
 
