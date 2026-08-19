@@ -65,7 +65,11 @@ def test_enable_run_store_rls_hardens_every_existing_table() -> None:
     hardened = enable_run_store_rls(engine)  # type: ignore[arg-type]
 
     assert hardened == len(RUN_STORE_RLS_TABLES)
-    alters = [statement for statement in engine.connection.statements if statement.startswith("ALTER")]
+    alters = [
+        statement
+        for statement in engine.connection.statements
+        if statement.startswith("ALTER")
+    ]
     assert alters == [
         f'ALTER TABLE public."{table_name}" ENABLE ROW LEVEL SECURITY'
         for table_name in RUN_STORE_RLS_TABLES
@@ -78,5 +82,9 @@ def test_enable_run_store_rls_skips_tables_that_do_not_exist_yet() -> None:
     hardened = enable_run_store_rls(engine)  # type: ignore[arg-type]
 
     assert hardened == 1
-    alters = [statement for statement in engine.connection.statements if statement.startswith("ALTER")]
+    alters = [
+        statement
+        for statement in engine.connection.statements
+        if statement.startswith("ALTER")
+    ]
     assert alters == ['ALTER TABLE public."test_runs" ENABLE ROW LEVEL SECURITY']
