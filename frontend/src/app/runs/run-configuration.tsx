@@ -10,6 +10,12 @@ import {
   type ConnectionState,
 } from "./runs-ui";
 
+type CollectionMetadata = ScenarioPack & {
+  kind?: "pack" | "suite";
+  included_pack_ids?: string[];
+  allowed_agent_targets?: AgentTarget[];
+};
+
 type RunConfigurationProps = {
   packs: ScenarioPack[];
   packsLoading: boolean;
@@ -37,6 +43,11 @@ type RunConfigurationProps = {
   onCreateRun: () => void;
 };
 
+function targetsFor(collection: ScenarioPack | null): AgentTarget[] {
+  const declared = (collection as CollectionMetadata | null)?.allowed_agent_targets;
+  return declared?.length ? declared : ["built_in_demo", "external_http"];
+}
+
 export function RunConfiguration({
   packs,
   packsLoading,
@@ -63,13 +74,17 @@ export function RunConfiguration({
   onTestConnection,
   onCreateRun,
 }: RunConfigurationProps) {
+  const selectedMetadata = selectedPack as CollectionMetadata | null;
+  const allowedTargets = targetsFor(selectedPack);
+  const targetAllowed = allowedTargets.includes(agentTarget);
+
   return (
     <section className={styles.runControls} aria-labelledby="run-controls-title">
       <div className={styles.controlIntro}>
         <span className={styles.stepNumber}>01</span>
         <div>
           <h2 id="run-controls-title">Configure run</h2>
-          <p>The selected mode applies only to the next run.</p>
+          <p>Select a pack or suite, then run it against a compatible agent target.</p>
         </div>
       </div>
 
@@ -83,42 +98,58 @@ export function RunConfiguration({
       ) : (
         <div className={styles.controlFields}>
           <label>
-            <span>Scenario pack</span>
+            <span>Test collection</span>
             <select
               value={selectedPackId}
-              onChange={(event) => onPackChange(event.target.value)}
+              onChange={(event) => {
+                const nextId = event.target.value;
+                const nextCollection = packs.find((pack) => pack.id === nextId) ?? null;
+                const nextTargets = targetsFor(nextCollection);
+                onPackChange(nextId);
+                if (!nextTargets.includes(agentTarget) && nextTargets[0]) {
+                  onTargetChange(nextTargets[0]);
+                }
+              }}
               disabled={packsLoading || isCreating || runIsActive}
             >
-              {packsLoading && <option>Loading packs…</option>}
-              {packs.map((pack) => (
-                <option value={pack.id} key={pack.id}>
-                  {pack.name} · {pack.scenario_count} scenarios
-                </option>
-              ))}
+              {packsLoading && <option>Loading collections…</option>}
+              {packs.map((pack) => {
+                const metadata = pack as CollectionMetadata;
+                return (
+                  <option value={pack.id} key={pack.id}>
+                    {metadata.kind === "suite" ? "Suite · " : "Pack · "}
+                    {pack.name} · {pack.scenario_count} scenarios
+                  </option>
+                );
+              })}
             </select>
           </label>
 
           <fieldset className={styles.modeField} disabled={isCreating || runIsActive}>
             <legend>Agent target</legend>
             <div className={styles.modeOptions}>
-              {TARGET_OPTIONS.map((option) => (
-                <label
-                  className={agentTarget === option.value ? styles.modeSelected : ""}
-                  key={option.value}
-                >
-                  <input
-                    type="radio"
-                    name="agent-target"
-                    value={option.value}
-                    checked={agentTarget === option.value}
-                    onChange={() => onTargetChange(option.value)}
-                  />
-                  <span>
-                    <strong>{option.label}</strong>
-                    <small>{option.note}</small>
-                  </span>
-                </label>
-              ))}
+              {TARGET_OPTIONS.map((option) => {
+                const supported = allowedTargets.includes(option.value);
+                return (
+                  <label
+                    className={agentTarget === option.value ? styles.modeSelected : ""}
+                    key={option.value}
+                  >
+                    <input
+                      type="radio"
+                      name="agent-target"
+                      value={option.value}
+                      checked={agentTarget === option.value}
+                      disabled={!supported}
+                      onChange={() => onTargetChange(option.value)}
+                    />
+                    <span>
+                      <strong>{option.label}</strong>
+                      <small>{supported ? option.note : "Not supported by this collection"}</small>
+                    </span>
+                  </label>
+                );
+              })}
             </div>
           </fieldset>
 
@@ -143,10 +174,11 @@ export function RunConfiguration({
               packsLoading ||
               isCreating ||
               runIsActive ||
+              !targetAllowed ||
               !externalConnectionReady
             }
           >
-            {isCreating ? "Starting…" : runIsActive ? "Run in progress" : "Run Test Pack"}
+            {isCreating ? "Starting…" : runIsActive ? "Run in progress" : "Run Test Collection"}
             <span aria-hidden="true">↗</span>
           </button>
 
@@ -245,7 +277,10 @@ export function RunConfiguration({
 
       {selectedPack && !packsError && (
         <p className={styles.packDescription}>
-          <strong>{selectedPack.id}</strong> · {selectedPack.description}
+          <strong>
+            {selectedMetadata?.kind === "suite" ? "SUITE" : "PACK"} · {selectedPack.id}
+          </strong>{" "}
+          · {selectedPack.description}
         </p>
       )}
     </section>
