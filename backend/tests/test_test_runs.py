@@ -71,7 +71,7 @@ async def execute_pack(
 def test_insurance_pack_exists_with_ten_stably_ordered_scenarios() -> None:
     packs = ScenarioPackRegistry().list_packs()
 
-    assert len(packs) == 1
+    assert len(packs) == 2
     pack = packs[0]
     assert pack.id == "insurance-v1"
     assert pack.name == "Insurance Reliability Pack v1"
