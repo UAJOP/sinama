@@ -1,8 +1,9 @@
+import re
 from enum import StrEnum
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, StringConstraints
+from pydantic import Field, StringConstraints, field_validator, model_validator
 
 from app.models import JsonScalar, StrictModel, ToolReference
 
@@ -11,6 +12,14 @@ StableScenarioId = Annotated[
     StringConstraints(pattern=r"^[A-Z][A-Z0-9]{1,15}-[0-9]{3}$"),
 ]
 SemanticVersion = Annotated[str, StringConstraints(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$")]
+ArgumentName = Annotated[
+    str,
+    StringConstraints(strip_whitespace=True, min_length=1, max_length=128),
+]
+RegexPattern = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=256),
+]
 SCENARIO_DATA_DIRECTORY = Path(__file__).resolve().parent / "scenario_data"
 # Backward-compatible alias used by existing insurance fixture tests.
 SCENARIO_DIRECTORY = SCENARIO_DATA_DIRECTORY / "insurance"
@@ -74,6 +83,75 @@ class ForbiddenToolCall(StrictModel):
     condition: str
 
 
+class ToolOrderConstraint(StrictModel):
+    before: ToolReference
+    after: ToolReference
+
+    @model_validator(mode="after")
+    def reject_self_dependency(self) -> "ToolOrderConstraint":
+        if self.before == self.after:
+            raise ValueError("Tool order constraint must reference two different tools.")
+        return self
+
+
+class ArgumentExistsConstraint(StrictModel):
+    type: Literal["exists"]
+    tool: ToolReference
+    argument: ArgumentName
+
+
+class ArgumentOneOfConstraint(StrictModel):
+    type: Literal["one_of"]
+    tool: ToolReference
+    argument: ArgumentName
+    values: list[JsonScalar] = Field(min_length=1, max_length=50)
+
+
+class ArgumentPatternConstraint(StrictModel):
+    type: Literal["pattern"]
+    tool: ToolReference
+    argument: ArgumentName
+    pattern: RegexPattern
+
+    @field_validator("pattern")
+    @classmethod
+    def validate_pattern(cls, value: str) -> str:
+        try:
+            re.compile(value)
+        except re.error as error:
+            raise ValueError("pattern must be a valid regular expression") from error
+        return value
+
+
+class ArgumentRangeConstraint(StrictModel):
+    type: Literal["range"]
+    tool: ToolReference
+    argument: ArgumentName
+    min_value: float | None = None
+    max_value: float | None = None
+
+    @model_validator(mode="after")
+    def validate_bounds(self) -> "ArgumentRangeConstraint":
+        if self.min_value is None and self.max_value is None:
+            raise ValueError("Range constraint requires min_value or max_value.")
+        if (
+            self.min_value is not None
+            and self.max_value is not None
+            and self.min_value > self.max_value
+        ):
+            raise ValueError("min_value cannot be greater than max_value.")
+        return self
+
+
+ArgumentConstraint = Annotated[
+    ArgumentExistsConstraint
+    | ArgumentOneOfConstraint
+    | ArgumentPatternConstraint
+    | ArgumentRangeConstraint,
+    Field(discriminator="type"),
+]
+
+
 class ExpectedBrokenResult(StrictModel):
     status: Literal["fail"]
     category: str
@@ -108,6 +186,8 @@ class Scenario(StrictModel):
     required_response_phrases: list[str] = Field(default_factory=list)
     max_tool_call_counts: dict[ToolReference, int] = Field(default_factory=dict)
     loop_detection_enabled: bool = False
+    tool_order_constraints: list[ToolOrderConstraint] = Field(default_factory=list)
+    argument_constraints: list[ArgumentConstraint] = Field(default_factory=list)
 
 
 def load_scenario(path: Path) -> Scenario:
