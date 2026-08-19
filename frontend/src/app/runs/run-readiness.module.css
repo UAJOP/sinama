@@ -1,0 +1,96 @@
+.card {
+  margin-top: 16px;
+  padding: 18px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: rgba(9, 19, 17, 0.96);
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.16);
+}
+
+.ready { border-color: #315f4f; }
+.warning { border-color: #5a5330; }
+.blocked { border-color: #643b3b; }
+
+.head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.head h2 { margin: 4px 0 0; font-size: 16px; letter-spacing: -0.025em; }
+.eyebrow {
+  margin: 0;
+  color: #6f8981;
+  font: 700 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.12em;
+}
+
+.badge {
+  flex: none;
+  padding: 7px 9px;
+  border: 1px solid #315447;
+  border-radius: 999px;
+  color: #72d5aa;
+  background: #0e281f;
+  font: 800 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.08em;
+}
+.warning .badge { border-color: #5a5330; color: #d4c477; background: #211f10; }
+.blocked .badge { border-color: #643b3b; color: #e59696; background: #291414; }
+
+.summary { margin: 10px 0 0; color: #8ba29b; font-size: 11px; line-height: 1.55; }
+
+.reasons { display: grid; gap: 7px; margin-top: 14px; }
+.reason {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 9px;
+  padding: 10px 11px;
+  border: 1px solid #203831;
+  border-radius: 10px;
+  background: #08130f;
+}
+.reasonMark {
+  min-width: 52px;
+  padding-top: 2px;
+  color: #d4c477;
+  font: 800 8px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-transform: uppercase;
+}
+.blocker .reasonMark { color: #e59696; }
+.reason strong { display: block; color: var(--text); font-size: 10px; }
+.reason p { margin: 4px 0 0; color: #7f9890; font-size: 10px; line-height: 1.45; }
+.meta { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.meta code {
+  padding: 3px 5px;
+  border-radius: 5px;
+  color: #6f8981;
+  background: #101e1a;
+  font-size: 8px;
+}
+
+.state {
+  margin-top: 16px;
+  padding: 14px 16px;
+  border: 1px dashed #29423b;
+  border-radius: 12px;
+  color: #78928a;
+  background: #08120f;
+  font-size: 11px;
+}
+.state button {
+  margin-left: 8px;
+  border: 0;
+  color: var(--green);
+  background: transparent;
+  cursor: pointer;
+  font: inherit;
+  font-weight: 700;
+}
+
+@media (max-width: 700px) {
+  .head { display: grid; }
+  .badge { width: fit-content; }
+  .reason { grid-template-columns: 1fr; }
+}
