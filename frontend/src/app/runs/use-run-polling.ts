@@ -24,22 +24,24 @@ type PollingArgs = {
   setRunError: Dispatch<SetStateAction<string | null>>;
 };
 
-export function useRunPolling({
-  run,
-  pollRetry,
-  pollSerial,
-  setRun,
-  setIsLoadingResults,
-  setIsLoadingComparison,
-  setComparisonError,
-  setComparisonResponse,
-  setRecentRunsReload,
-  setRunError,
-}: PollingArgs) {
+export function useRunPolling(args: PollingArgs) {
+  const {
+    run,
+    pollRetry,
+    pollSerial: pollSerialRef,
+    setRun,
+    setIsLoadingResults,
+    setIsLoadingComparison,
+    setComparisonError,
+    setComparisonResponse,
+    setRecentRunsReload,
+    setRunError,
+  } = args;
+
   useEffect(() => {
     if (!run || TERMINAL_STATUSES.includes(run.lifecycle_status)) return;
 
-    const serial = ++pollSerial.current;
+    const serial = ++pollSerialRef.current;
     const controller = new AbortController();
     let timer: number | undefined;
     let consecutiveFailures = 0;
@@ -47,7 +49,7 @@ export function useRunPolling({
     const poll = async () => {
       try {
         const current = await getTestRun(run.run_id, controller.signal);
-        if (serial !== pollSerial.current || controller.signal.aborted) return;
+        if (serial !== pollSerialRef.current || controller.signal.aborted) return;
         consecutiveFailures = 0;
         if (TERMINAL_STATUSES.includes(current.lifecycle_status)) {
           setIsLoadingResults(true);
@@ -61,7 +63,7 @@ export function useRunPolling({
           timer = window.setTimeout(() => void poll(), POLL_DELAY_MS);
         }
       } catch (cause) {
-        if (isAbortError(cause) || serial !== pollSerial.current) return;
+        if (isAbortError(cause) || serial !== pollSerialRef.current) return;
         consecutiveFailures += 1;
         if (consecutiveFailures <= MAX_POLL_FAILURES) {
           timer = window.setTimeout(() => void poll(), POLL_DELAY_MS * consecutiveFailures);
@@ -80,7 +82,7 @@ export function useRunPolling({
     };
   }, [
     pollRetry,
-    pollSerial,
+    pollSerialRef,
     run,
     setComparisonError,
     setComparisonResponse,
