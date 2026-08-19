@@ -2,100 +2,102 @@
 
 ## Mission
 
-Continue SINAMA as a Turkish-first AI Agent Reliability Lab for testing customer-service agents before production. The deterministic MVP now spans multiple verticals; new work should deepen semantic coverage without weakening inspectability or release discipline.
+SINAMA is a Turkish-first AI Agent Reliability Lab for testing customer-service agents before production. The planned MVP feature sequence is now complete. New work should prioritize calibration, stabilization and portfolio-quality proof rather than adding features for their own sake.
 
-Read these first:
+Read first:
 
 1. `README.md`
-2. `docs/PRD.md`
-3. `docs/MVP.md`
-4. `docs/ARCHITECTURE.md`
-5. `docs/SECURITY.md`
-6. `docs/FIRST_VERTICAL_SLICE.md` for historical context only
+2. `docs/ARCHITECTURE.md`
+3. `docs/SEMANTIC_SHADOW.md`
+4. `docs/SECURITY.md`
+5. `docs/PRD.md`
+6. `docs/MVP.md`
 
 ## Current product state
 
-The repository already includes:
+Implemented:
 
 - Next.js/TypeScript frontend and FastAPI/Python backend
 - deterministic Healthy/Broken insurance demo agent
-- `insurance-v1` with ten hand-reviewed Turkish scenarios
-- `ecommerce-v1` with four hand-reviewed Turkish scenarios using generic tools such as `lookup_order`, `refund_order` and `escalate_return_case`
-- typed `customer-service-core-v1` suite composing both packs into one stable 14-scenario run
-- collection-level allowed-agent-target metadata; e-commerce and cross-vertical suite are external HTTP only
-- async multi-turn execution through one `AgentAdapter` / RunService pipeline
-- SSRF-hardened external HTTP agent testing with ephemeral bearer tokens
-- deterministic required/forbidden tool checks, exact arguments, call counts, response phrases and loop detection
-- typed workflow constraints for tool prerequisites/order, argument existence, one-of values, regex and numeric ranges
-- inspectable `EvaluationEvidence`, structured `Failure` objects and per-dimension metrics
-- in-memory and PostgreSQL run stores behind one interface
-- persistent history, baseline assignment, explicit comparison, version trends and release readiness
-- deterministic `READY` / `WARNING` / `BLOCKED` release-readiness policy with machine-readable reasons
-- target-aware `/runs` selector plus focused evidence/trend/readiness UI components
-- startup recovery, PostgreSQL RLS hardening and Railway pre-deploy Alembic migrations
-- CI gates for backend tests/Ruff/mypy and frontend lint/typecheck/build
+- `insurance-v1` — 10 Turkish scenarios
+- `ecommerce-v1` — 4 Turkish scenarios with generic domain tools
+- `customer-service-core-v1` — typed 14-scenario cross-vertical suite
+- target-aware collection metadata and UI selector
+- secure external HTTP agent adapter with SSRF controls and ephemeral bearer tokens
+- async multi-turn RunService / ScenarioRunner pipeline
+- deterministic required/forbidden tools, exact args, call counts, response phrases and loop checks
+- typed prerequisites/order, arg existence, one-of, regex and numeric-range constraints
+- inspectable evidence, structured failures and per-dimension metrics
+- memory and PostgreSQL run stores
+- persistent history, baselines, explicit comparison and version trends
+- deterministic `READY` / `WARNING` / `BLOCKED` release readiness
+- optional Semantic Judge Shadow Mode
+- focused `/runs` components for evidence, regression, trends, readiness and semantic shadow
+- Alembic migrations, Railway pre-deploy migration command and runtime RLS hardening
+- full GitHub Actions quality gate
 
-## Platform boundary
+## Semantic Shadow invariants
 
-The built-in insurance `ToolName` enum is not the platform contract.
+Semantic evaluation is **not** another scoring system.
 
-External agents and scenario fixtures support validated generic tool identifiers. The e-commerce pack proves that new verticals do not require new core tool enum members or domain-specific evaluator branches.
+Current explicit types:
 
-Scenario fixtures live in vertical directories below `app/scenario_data/` and use stable IDs such as `INS-001` and `ECOM-001`.
+- `unsupported_promise`
+- `intent_satisfaction`
+- `internal_instruction_disclosure`
 
-## Packs and suites
+Current proof scenarios:
 
-A run resolves a scenario **collection**:
+- `INS-002`
+- `INS-005`
+- `INS-007`
 
-- `insurance-v1` — 10 scenarios, built-in demo or external HTTP
-- `ecommerce-v1` — 4 scenarios, external HTTP only
-- `customer-service-core-v1` — suite of both packs, 14 scenarios, external HTTP only
+Rules that must remain true:
 
-Suite execution must remain a composition concern, not a scoring concern. The registry flattens included packs in declared order and computes supported targets by intersection. RunService, evaluator, stores, trends and readiness remain unchanged by domain.
+- provider is disabled by default
+- deterministic runs require no LLM API key
+- semantic evaluation happens after deterministic scoring and PII masking
+- provider sees only masked transcript + explicit semantic rubrics; not hidden context
+- semantic PASS/FAIL/UNCERTAIN is advisory-only
+- timeout/provider/malformed-output errors stay semantic errors
+- semantic results cannot change deterministic status, severity, metrics or failures
+- semantic results cannot change regression/trend direction
+- semantic results cannot change Release Readiness
+- real provider secrets stay in host-managed environment only
+- CI uses fake judges / `httpx.MockTransport`, never paid calls
 
-The API request field is still named `pack_id` for backwards compatibility even when it contains a suite ID.
+A dedicated readiness-isolation test must remain green: a deterministic PASS carrying semantic FAIL can still be `READY` when all deterministic readiness conditions are satisfied.
 
-Historical persisted pack snapshots must keep validating. New collection fields are additive with defaults; suite composition lives inside the existing JSON snapshot and does not require a database schema change.
+## Scenario collections
 
-## Deterministic evaluator contract
+- `insurance-v1`: built-in demo or external HTTP
+- `ecommerce-v1`: external HTTP only
+- `customer-service-core-v1`: external HTTP only
 
-Prefer typed rules over a general expression language. Current deterministic checks include:
+The insurance `ToolName` enum is a demo implementation detail. External/scenario contracts remain generic. New verticals must not add domain-specific branches to evaluator or readiness logic.
 
-- required/forbidden tools
-- exact argument values
-- call-count limits
-- required/forbidden response phrases
-- repeated-response detection
-- conditional tool prerequisites/order
-- argument existence
-- one-of values
-- regex full-match
-- inclusive numeric ranges
+The historical API field is still named `pack_id` for compatibility even when it contains a suite ID.
 
-Each failed rule must retain concrete evidence and map to a structured failure. New deterministic checks should feed existing metrics instead of inventing parallel scoring semantics.
+## Deterministic readiness policy
 
-## Release-readiness policy
-
-Readiness remains deterministic and on-demand:
-
-- orchestration/scenario execution errors => `BLOCKED`
-- HIGH/CRITICAL deterministic failures => `BLOCKED`
+- orchestration/scenario execution error => `BLOCKED`
+- HIGH/CRITICAL deterministic failure => `BLOCKED`
 - regression => `BLOCKED`
-- MEDIUM/LOW deterministic failures => `WARNING`
+- MEDIUM/LOW deterministic failure => `WARNING`
 - missing/incompatible baseline => `WARNING`
 - clean baseline or clean stable/improved compatible run => `READY`
 
-Do not make a future semantic judge silently change these rules. Semantic evidence starts advisory/shadow-only.
+Do not promote semantic evidence into blocking policy without a separate, evidence-backed product decision.
 
 ## Development workflow
 
-- `main` is stable/release.
-- `develop` is integration.
-- focused feature branches start from `develop`.
-- feature PRs target `develop`.
-- promote `develop` to `main` only after full CI and release review.
+- `main` = stable/release
+- `develop` = integration
+- feature branches start from `develop`
+- feature PRs target `develop`
+- promote `develop` to `main` only after full release CI
 
-Required validation:
+Required checks:
 
 ### Backend
 
@@ -115,48 +117,60 @@ pnpm build
 
 ## Engineering constraints
 
-- never commit secrets, tokens, database credentials or generated `.env` files
-- external-agent credentials remain ephemeral
+- never commit secrets/tokens/database credentials/local env files
+- keep external credentials ephemeral
 - prefer typed Pydantic/TypeScript contracts
 - deterministic evidence remains authoritative where a rule can be expressed structurally
-- do not add arbitrary executable expressions to fixtures
-- do not add a second scoring system in storage/UI/regression/readiness
-- keep memory and PostgreSQL stores behaviorally aligned
+- do not add arbitrary executable fixture expressions
+- do not create parallel scoring semantics in UI/store/regression/readiness
 - preserve persisted-model compatibility or use explicit migrations
-- do not add Redis/Celery/Kafka without a real workload requirement
+- keep memory/PostgreSQL behavior aligned
 - keep `/runs` component boundaries focused
-- keep new verticals out of core evaluator branching
+- avoid Redis/Celery/Kafka/auth/billing/voice unless a real product requirement appears
+- avoid new product scope merely because the MVP feature queue is empty
 
-## Immediate roadmap — Semantic Judge Shadow Mode
+## Next phase — calibration and stabilization
 
-Add optional LLM-based evaluation only for expectations that cannot be represented reliably with deterministic contracts.
+Priority order:
 
-First target judgments:
+### 1. Semantic calibration set
 
-- unsupported promises / fabricated guarantees
-- user-intent satisfaction
-- internal-instruction / hidden-prompt disclosure
+Create a hand-labeled Turkish evaluation set for the three semantic expectation types. Measure:
 
-Required properties:
+- agreement with human labels
+- false-positive / false-negative rates by type
+- repeated-run stability
+- robustness to Turkish slang, ambiguity and adversarial phrasing
+- latency/token/cost distribution
 
-- a separate semantic-evaluation interface from `deterministic_tool_contract`
-- explicit opt-in; deterministic runs work with no provider/API key
-- structured result model with verdict, concise reason and relevant assistant-turn evidence
-- bounded prompt/input size and existing masking rules preserved
-- judge timeout/provider failure reported as semantic-evaluation error, never as agent failure
-- provider latency/token/cost metadata when available
-- fake/mock judge adapters in tests; no paid network calls in CI
-- clearly labeled advisory/shadow UI
-- release readiness remains deterministic and unchanged in the first version
+Keep semantic shadow non-blocking while calibration is insufficient.
+
+### 2. External-agent acceptance proof
+
+Exercise insurance, e-commerce and the cross-vertical suite against representative external demo endpoints and capture clean/reliability-regression proof for the case study.
+
+### 3. Recruiter-facing polish
+
+Update portfolio copy/screenshots around the strongest story:
+
+- deterministic evidence catches behavior that still executes successfully
+- generic second vertical proves the platform boundary
+- version trends + readiness answer the release question
+- semantic shadow shows deliberate handling of probabilistic evaluation rather than replacing ground truth
+
+### 4. Maintenance
+
+Handle small maintenance/security items as needed, including GitHub Actions runtime deprecation warnings, dependency advisories and documentation drift.
 
 ## Definition of good next work
 
-A change is worth shipping when it improves one of these without weakening inspectability:
+A change is worth doing when it materially improves:
 
-- catches a real class of regression the deterministic engine cannot express
-- makes release decisions clearer
-- improves comparison/history usefulness
-- proves another vertical without core-domain coupling
-- improves maintainability or security
+- evaluator trustworthiness,
+- release-decision clarity,
+- external-agent proof,
+- calibration evidence,
+- maintainability/security, or
+- portfolio communication.
 
-A large feature that does none of these is out of scope for the MVP.
+Otherwise, defer it.
