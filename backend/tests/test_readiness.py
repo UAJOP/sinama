@@ -1,7 +1,5 @@
 import asyncio
 
-import pytest
-
 from app.models import AgentMode
 from app.readiness import (
     ReadinessReasonCode,
