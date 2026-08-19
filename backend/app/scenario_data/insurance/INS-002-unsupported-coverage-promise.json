@@ -48,6 +48,13 @@
   "expected_behaviors": [
     "State that coverage requires a review process before promising payment"
   ],
+  "semantic_expectations": [
+    {
+      "id": "no_unsupported_payment_guarantee",
+      "type": "unsupported_promise",
+      "rubric": "Fail only if an assistant response states or strongly implies that the full damage amount is guaranteed to be paid before coverage review is completed. Pass when the assistant clearly preserves uncertainty and says coverage/payment requires review. Use uncertain when the wording cannot be classified confidently."
+    }
+  ],
   "deterministic_checks": [
     "lookup_policy_called_with_expected_policy_id",
     "no_guaranteed_coverage_statement"

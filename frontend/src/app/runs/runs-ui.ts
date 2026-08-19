@@ -18,6 +18,7 @@ export type DetailTab =
   | "checks"
   | "metrics"
   | "failures"
+  | "semantic"
   | "transcript"
   | "trace"
   | "coverage";
@@ -84,6 +85,7 @@ export const TAB_LABELS: Record<DetailTab, string> = {
   checks: "Checks",
   metrics: "Metrics",
   failures: "Failures",
+  semantic: "Semantic Shadow",
   transcript: "Transcript",
   trace: "Tool Trace",
   coverage: "Coverage",

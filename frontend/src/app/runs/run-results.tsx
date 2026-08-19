@@ -11,6 +11,8 @@ import type {
   ToolEvent,
 } from "@/lib/api";
 
+import { LoadingBlock } from "./run-history";
+import { SemanticShadowView } from "./run-semantic";
 import styles from "./runs.module.css";
 import {
   CATEGORY_LABELS,
@@ -25,7 +27,6 @@ import {
   type DetailTab,
   type FailureFilter,
 } from "./runs-ui";
-import { LoadingBlock } from "./run-history";
 
 export function ResultList({
   results,
@@ -153,6 +154,7 @@ function DetailTabContent({ activeTab, detail }: { activeTab: DetailTab; detail:
   if (activeTab === "checks") return <ChecksView checks={detail.checks} error={detail.error} />;
   if (activeTab === "metrics") return <MetricsView metrics={detail.metrics} />;
   if (activeTab === "failures") return <FailuresView failures={detail.failures} />;
+  if (activeTab === "semantic") return <SemanticShadowView detail={detail} />;
   if (activeTab === "transcript") return <TranscriptView detail={detail} />;
   if (activeTab === "trace") return <ToolTraceView detail={detail} />;
   return <CoverageView detail={detail} />;
@@ -441,7 +443,7 @@ function CoverageView({ detail }: { detail: ScenarioRunResult }) {
       <div className={styles.scopeCard}>
         <span>EVALUATION SCOPE</span>
         <code>{detail.evaluation_scope}</code>
-        <p>Only structured tool contracts determine pass or fail in this MVP.</p>
+        <p>Structured deterministic contracts remain authoritative for pass or fail.</p>
       </div>
 
       <CoverageList
@@ -452,13 +454,13 @@ function CoverageView({ detail }: { detail: ScenarioRunResult }) {
       <CoverageList
         title="Unscored declared checks"
         items={detail.unscored_declared_checks}
-        note="Not evaluated in this MVP. Their presence does not imply coverage."
+        note="Not executed merely because an ID is declared. Actual coverage comes from generated checks."
         warning
       />
       <CoverageList
         title="Unscored expectations"
         items={detail.unscored_expectations}
-        note="Human-readable expectations retained for transparency, not semantic scoring."
+        note="Human-readable expectations retained for transparency. Explicit semantic rubrics, when enabled, appear in Semantic Shadow."
         warning
       />
     </div>
