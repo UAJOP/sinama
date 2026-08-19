@@ -30,6 +30,13 @@ class ConversationPhase(StrEnum):
 
 
 class ToolName(StrEnum):
+    """Built-in demo-agent tool names.
+
+    External agents and scenario contracts are intentionally not restricted to
+    this enum; they use ``ToolIdentifier`` so future verticals can introduce
+    their own tools without changing SINAMA's core models.
+    """
+
     LOOKUP_POLICY = "lookup_policy"
     COLLECT_CLAIM_DETAILS = "collect_claim_details"
     REQUEST_DOCUMENT = "request_document"
@@ -37,6 +44,15 @@ class ToolName(StrEnum):
     HANDOFF_TO_HUMAN = "handoff_to_human"
 
 
+ToolIdentifier = Annotated[
+    str,
+    StringConstraints(
+        strip_whitespace=True,
+        min_length=1,
+        max_length=128,
+        pattern=r"^[A-Za-z][A-Za-z0-9_.:-]*$",
+    ),
+]
 JsonScalar = str | int | float | bool | None
 NonEmptyMessage = Annotated[
     str, StringConstraints(strip_whitespace=True, min_length=1, max_length=2_000)
@@ -45,7 +61,7 @@ NonEmptyMessage = Annotated[
 
 class ToolEvent(StrictModel):
     id: UUID
-    tool: ToolName
+    tool: ToolIdentifier
     arguments: dict[str, JsonScalar]
     timestamp: datetime
 

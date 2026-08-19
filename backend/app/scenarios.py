@@ -4,11 +4,16 @@ from typing import Annotated, Literal
 
 from pydantic import Field, StringConstraints
 
-from app.models import StrictModel, ToolName
+from app.models import JsonScalar, StrictModel, ToolIdentifier
 
-StableScenarioId = Annotated[str, StringConstraints(pattern=r"^INS-[0-9]{3}$")]
+StableScenarioId = Annotated[
+    str,
+    StringConstraints(pattern=r"^[A-Z][A-Z0-9]{1,15}-[0-9]{3}$"),
+]
 SemanticVersion = Annotated[str, StringConstraints(pattern=r"^[0-9]+\.[0-9]+\.[0-9]+$")]
-SCENARIO_DIRECTORY = Path(__file__).resolve().parent / "scenario_data" / "insurance"
+SCENARIO_DATA_DIRECTORY = Path(__file__).resolve().parent / "scenario_data"
+# Backward-compatible alias used by existing insurance fixture tests.
+SCENARIO_DIRECTORY = SCENARIO_DATA_DIRECTORY / "insurance"
 
 
 class Severity(StrEnum):
@@ -53,16 +58,19 @@ class SyntheticContext(StrictModel):
     required_document: str | None = None
     document_available: bool | None = None
     request_context: str | None = None
+    # Domain-specific fixture data for future packs. Existing insurance fields
+    # stay first-class and backwards compatible while new verticals avoid model churn.
+    attributes: dict[str, JsonScalar] = Field(default_factory=dict)
 
 
 class ExpectedToolCall(StrictModel):
-    name: ToolName
+    name: ToolIdentifier
     required: bool = True
-    constraints: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
+    constraints: dict[str, JsonScalar] = Field(default_factory=dict)
 
 
 class ForbiddenToolCall(StrictModel):
-    name: ToolName
+    name: ToolIdentifier
     condition: str
 
 
@@ -99,7 +107,7 @@ class Scenario(StrictModel):
     expected_behaviors: list[str] = Field(default_factory=list)
     forbidden_response_phrases: list[str] = Field(default_factory=list)
     required_response_phrases: list[str] = Field(default_factory=list)
-    max_tool_call_counts: dict[ToolName, int] = Field(default_factory=dict)
+    max_tool_call_counts: dict[ToolIdentifier, int] = Field(default_factory=dict)
     loop_detection_enabled: bool = False
 
 
@@ -114,9 +122,13 @@ class ScenarioNotFoundError(LookupError):
 
 
 def load_scenario_by_id(scenario_id: str) -> Scenario:
-    """Resolve a fixture by validated content instead of interpolating a user path."""
+    """Resolve a fixture by validated content instead of interpolating a user path.
 
-    for path in sorted(SCENARIO_DIRECTORY.glob("INS-*.json")):
+    Scenario files are discovered one vertical directory below ``scenario_data``
+    so adding a future ``ecommerce`` or ``banking`` pack requires no loader change.
+    """
+
+    for path in sorted(SCENARIO_DATA_DIRECTORY.glob("*/*.json")):
         scenario = load_scenario(path)
         if scenario.id == scenario_id:
             return scenario
