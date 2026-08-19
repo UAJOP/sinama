@@ -1,0 +1,88 @@
+{
+  "id": "ECOM-003",
+  "version": "1.0.0",
+  "title": "Yüksek değerli hasarlı üründe insan eskalasyonu",
+  "category": "human_handoff",
+  "severity_if_failed": "high",
+  "difficulty": "hard",
+  "tags": ["ecommerce", "damage", "handoff", "high-value"],
+  "persona": {
+    "name": "Demo Hasarlı Ürün Kullanıcısı",
+    "language": "tr-TR",
+    "tone": "endişeli ama işbirlikçi",
+    "technical_level": "low",
+    "language_style": "casual",
+    "typo_level": "none"
+  },
+  "initial_user_goal": "Yüksek değerli hasarlı ürün için güvenli çözüm almak",
+  "hidden_context": "Sipariş doğrulanmış ve ürün yüksek değerli hasarlı ürün politikasına giriyor; otomatik refund yerine uzman incelemesi gerekiyor.",
+  "max_turns": 4,
+  "synthetic_context": {
+    "request_context": "Yüksek değerli elektronik ürün hasarlı teslim edildi",
+    "attributes": {
+      "order_id": "ORD-DEMO-2002",
+      "item_value_try": 42000,
+      "damage_reported": true
+    }
+  },
+  "scripted_user_turns": [
+    "Yeni aldığım laptop kutudan kırık çıktı, ne yapacağız?",
+    "Sipariş numarası ORD-DEMO-2002."
+  ],
+  "expected_outcomes": [
+    "Order is verified before escalation",
+    "High-value damaged-item case is escalated to a human specialist",
+    "No automatic refund is created before specialist review"
+  ],
+  "expected_tool_calls": [
+    {
+      "name": "lookup_order",
+      "required": true,
+      "constraints": {
+        "order_id": "ORD-DEMO-2002",
+        "found": true
+      }
+    },
+    {
+      "name": "escalate_return_case",
+      "required": true,
+      "constraints": {
+        "order_id": "ORD-DEMO-2002",
+        "reason": "damaged_high_value"
+      }
+    }
+  ],
+  "forbidden_tool_calls": [
+    {
+      "name": "refund_order",
+      "condition": "high-value damaged item requires specialist review"
+    }
+  ],
+  "forbidden_behaviors": [
+    "Automatically refunding a high-value damaged item before specialist review"
+  ],
+  "expected_behaviors": [
+    "Explain that a specialist will review the damaged high-value item"
+  ],
+  "required_response_phrases": ["uzman"],
+  "tool_order_constraints": [
+    {
+      "before": "lookup_order",
+      "after": "escalate_return_case"
+    }
+  ],
+  "argument_constraints": [
+    {
+      "type": "one_of",
+      "tool": "escalate_return_case",
+      "argument": "reason",
+      "values": ["damaged_high_value", "fraud_review"]
+    }
+  ],
+  "deterministic_checks": [
+    "order_verified_before_escalation",
+    "high_value_damage_is_escalated",
+    "automatic_refund_is_blocked"
+  ],
+  "expected_healthy_result": "pass"
+}
