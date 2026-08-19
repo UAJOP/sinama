@@ -239,12 +239,19 @@ class OpenAISemanticJudge:
             provider_output = _ProviderOutput.model_validate_json(output_text)
             usage = self._usage_from_response(payload_json)
         except (ValueError, TypeError, ValidationError, json.JSONDecodeError):
-            raise SemanticJudgeError("Semantic judge provider returned an invalid response.") from None
+            raise SemanticJudgeError(
+                "Semantic judge provider returned an invalid response."
+            ) from None
 
         expected_by_id = {item.id: item for item in request.expectations}
         returned_ids = [item.expectation_id for item in provider_output.checks]
-        if len(returned_ids) != len(set(returned_ids)) or set(returned_ids) != set(expected_by_id):
-            raise SemanticJudgeError("Semantic judge response did not cover the expected rubric set.")
+        if (
+            len(returned_ids) != len(set(returned_ids))
+            or set(returned_ids) != set(expected_by_id)
+        ):
+            raise SemanticJudgeError(
+                "Semantic judge response did not cover the expected rubric set."
+            )
 
         assistant_sequences = {
             turn.sequence for turn in request.transcript if turn.role == "assistant"
