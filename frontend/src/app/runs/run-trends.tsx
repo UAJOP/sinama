@@ -88,33 +88,33 @@ function TrendRow({ point }: { point: RunTrendPoint }) {
 
 export function RunTrends({ packId, reloadKey }: { packId: string; reloadKey: number }) {
   const [response, setResponse] = useState<RunTrendResponse | null>(null);
-  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [retryKey, setRetryKey] = useState(0);
 
   useEffect(() => {
-    if (!packId) {
-      setResponse(null);
-      return;
-    }
+    if (!packId) return;
 
     const controller = new AbortController();
-    setLoading(true);
-    setError(null);
 
     void listRunTrends(packId, 20, controller.signal)
-      .then(setResponse)
-      .catch((cause: unknown) => {
-        if (!isAbortError(cause)) {
-          setError(cause instanceof Error ? cause.message : "Reliability trends could not be loaded.");
+      .then((payload) => {
+        if (!controller.signal.aborted) {
+          setResponse(payload);
+          setError(null);
         }
       })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
+      .catch((cause: unknown) => {
+        if (!isAbortError(cause)) {
+          setError(
+            cause instanceof Error ? cause.message : "Reliability trends could not be loaded.",
+          );
+        }
       });
 
     return () => controller.abort();
   }, [packId, reloadKey, retryKey]);
+
+  const loading = Boolean(packId) && !error && response?.pack_id !== packId;
 
   return (
     <section className={styles.section} aria-labelledby="reliability-trends-title">
@@ -130,11 +130,20 @@ export function RunTrends({ packId, reloadKey }: { packId: string; reloadKey: nu
       </div>
 
       {loading ? (
-        <div className={styles.state} role="status">Loading version history…</div>
+        <div className={styles.state} role="status">
+          Loading version history…
+        </div>
       ) : error ? (
         <div className={styles.state} role="alert">
           {error}
-          <button type="button" onClick={() => setRetryKey((value) => value + 1)}>
+          <button
+            type="button"
+            onClick={() => {
+              setError(null);
+              setResponse(null);
+              setRetryKey((value) => value + 1);
+            }}
+          >
             Retry
           </button>
         </div>
