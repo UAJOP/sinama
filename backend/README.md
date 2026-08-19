@@ -15,6 +15,7 @@ FastAPI backend for SINAMA's deterministic customer-service agent reliability la
 - version-aware trends
 - release-readiness policy
 - optional semantic judge shadow evaluation
+- opt-in hand-labeled semantic calibration runner
 
 ## Local setup
 
@@ -77,6 +78,45 @@ SINAMA_SEMANTIC_JUDGE_API_KEY=<host-managed secret>
 ```
 
 Never commit or paste the real key. The provider only receives masked transcripts and explicit scenario semantic rubrics. Semantic results are advisory-only and cannot alter deterministic pass/fail, metrics, regression or release readiness.
+
+### Semantic calibration
+
+The packaged hand-labeled Turkish calibration set can be executed explicitly against the configured semantic judge. Human expected verdicts and rationales are kept out of the provider request.
+
+Low-cost one-pass calibration:
+
+```powershell
+$env:SINAMA_SEMANTIC_JUDGE_PROVIDER = "openai"
+$env:SINAMA_SEMANTIC_JUDGE_MODEL = "gpt-5.4-nano"
+# Set SINAMA_SEMANTIC_JUDGE_API_KEY only in your local shell or secret manager.
+sinama-semantic-calibrate --repeats 1
+```
+
+Repeated stability pass:
+
+```powershell
+sinama-semantic-calibrate --repeats 3 --output reports/semantic-calibration-3x.json
+```
+
+Run selected cases only:
+
+```powershell
+sinama-semantic-calibrate --case up_explicit_guarantee_formal --case is_direct_resolution_formal
+```
+
+The runner reports:
+
+- human/judge agreement
+- false positives / false negatives
+- confusion matrix totals
+- per-case repeated-run stability
+- mean and p95 latency
+- provider-reported token totals when available
+- raw per-case advisory verdict/reason metadata
+
+Agreement is intentionally omitted when any requested case/repetition fails, so partial provider errors cannot inflate the reported score. Reports are written under ignored `reports/` by default and contain no provider key.
+
+The calibration set includes formal, colloquial, noisy and transcript-adversarial Turkish cases. The adversarial cases deliberately contain assistant text attempting to steer the evaluator; they are measurement inputs, not trusted instructions.
 
 See [`docs/SEMANTIC_SHADOW.md`](../docs/SEMANTIC_SHADOW.md) for the full contract and calibration requirements.
 
