@@ -1,8 +1,9 @@
 """SQLAlchemy-backed run store.
 
-Mirrors `InMemoryRunStore` exactly, and renders every API model through the same
-shared projections in `app.test_runs`, so the two backends cannot disagree about
-what a run looks like. Regression scoring is still owned by `app.regression`.
+Mirrors `InMemoryRunStore` for normal run/history operations and renders API
+models through shared projections in `app.test_runs`. Trend listing reads only
+small denormalized result metadata; it never deserializes full transcript/check
+payloads merely to render the trend surface.
 
 All methods are synchronous and perform blocking I/O. Callers are responsible for
 keeping them off the asyncio event loop - `RunService` does this via
@@ -21,9 +22,14 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from app.db.models import RunBaselineRow, ScenarioResultRow, TestRunRow
 from app.models import AgentMode, AgentTarget
-from app.regression import RegressionComparisonResponse
+from app.regression import (
+    RegressionComparisonResponse,
+    critical_failure_fingerprints,
+    scenario_goal_score,
+)
 from app.scenario_packs import ScenarioPackSummary
 from app.scenario_runner import RunStatus, ScenarioRunResult
+from app.scenarios import Severity
 from app.test_runs import (
     INTERRUPTED_RUN_REASON,
     CorruptedRunRecordError,
@@ -41,6 +47,7 @@ from app.test_runs import (
     build_results_response,
     build_run_summary,
 )
+from app.trends import RunTrendResponse, TrendRunInput, build_run_trends
 
 logger = logging.getLogger(__name__)
 
@@ -48,15 +55,13 @@ _NON_TERMINAL_STATUSES = (
     TestRunLifecycleStatus.QUEUED.value,
     TestRunLifecycleStatus.RUNNING.value,
 )
+_TERMINAL_STATUSES = (
+    TestRunLifecycleStatus.COMPLETED.value,
+    TestRunLifecycleStatus.ERROR.value,
+)
 
 
 def _as_utc(value: datetime | None) -> datetime | None:
-    """Normalize a stored timestamp back to an aware UTC datetime.
-
-    PostgreSQL round-trips `timestamptz` faithfully; SQLite drops the offset, so
-    a naive value read back is by construction already UTC.
-    """
-
     if value is None:
         return None
     return value.replace(tzinfo=UTC) if value.tzinfo is None else value.astimezone(UTC)
@@ -113,7 +118,6 @@ class SqlRunStore:
                     error=None,
                 )
             )
-        # A run that was just created cannot already be the pack baseline.
         return build_run_summary(record, is_baseline=False, statuses=[])
 
     def mark_running(self, run_id: UUID) -> None:
@@ -152,6 +156,9 @@ class SqlRunStore:
                     position=next_position or 0,
                     scenario_id=result.scenario_id,
                     status=result.status.value,
+                    severity=result.severity.value if result.severity is not None else None,
+                    goal_score=scenario_goal_score(result),
+                    critical_failure_keys=sorted(critical_failure_fingerprints(result)),
                     payload=result.model_dump(mode="json"),
                 )
             )
@@ -161,8 +168,6 @@ class SqlRunStore:
             row = self._require_run_row(session, run_id)
             if row.lifecycle_status != TestRunLifecycleStatus.COMPLETED.value:
                 raise RunNotCompletedError("Only a completed run can be set as a baseline.")
-            # Replace rather than upsert: portable across dialects and still
-            # atomic inside this transaction, preserving one baseline per pack.
             session.execute(delete(RunBaselineRow).where(RunBaselineRow.pack_id == row.pack_id))
             session.add(
                 RunBaselineRow(
@@ -176,16 +181,7 @@ class SqlRunStore:
         return build_run_summary(record, is_baseline=True, statuses=statuses)
 
     def recover_interrupted_runs(self) -> int:
-        """Fail runs left mid-flight by a previous process.
-
-        SINAMA has no durable worker queue, so a `queued`/`running` row from a
-        dead process can never make progress. Marking them errored on startup is
-        the honest outcome; resuming execution is deliberately out of scope.
-        """
-
         with self._sessions.begin() as session:
-            # Connection-level execute so the affected row count is available
-            # (and correctly typed) for a bulk statement.
             result = session.connection().execute(
                 update(TestRunRow)
                 .where(TestRunRow.lifecycle_status.in_(_NON_TERMINAL_STATUSES))
@@ -200,8 +196,6 @@ class SqlRunStore:
             return result.rowcount or 0
 
     def clear(self) -> None:
-        """Delete all persisted history. Intended for tests and local resets."""
-
         with self._sessions.begin() as session:
             session.execute(delete(RunBaselineRow))
             session.execute(delete(ScenarioResultRow))
@@ -212,8 +206,6 @@ class SqlRunStore:
     def get_run(self, run_id: UUID) -> TestRunSummary:
         with self._sessions() as session:
             row = self._require_run_row(session, run_id)
-            # Aggregates come from the denormalized status column so that status
-            # polling never deserializes full transcripts.
             statuses = self._statuses_for(session, [run_id]).get(run_id, [])
             baselines = self._baselines_for(session, [row.pack_id])
             record = self._record_from_row(row, [])
@@ -270,6 +262,61 @@ class SqlRunStore:
             for row in rows
         ]
 
+    def list_trends(self, pack_id: str, limit: int = 20) -> RunTrendResponse:
+        if limit < 1:
+            return RunTrendResponse(pack_id=pack_id, points=[])
+
+        with self._sessions() as session:
+            newest_rows = list(
+                session.scalars(
+                    select(TestRunRow)
+                    .where(
+                        TestRunRow.pack_id == pack_id,
+                        TestRunRow.lifecycle_status.in_(_TERMINAL_STATUSES),
+                    )
+                    .order_by(TestRunRow.created_at.desc(), TestRunRow.run_id.desc())
+                    .limit(limit)
+                )
+            )
+            if not newest_rows:
+                return RunTrendResponse(pack_id=pack_id, points=[])
+
+            rows = list(reversed(newest_rows))
+            metadata = self._trend_metadata_for(session, [row.run_id for row in rows])
+            baseline_id = self._baselines_for(session, [pack_id]).get(pack_id)
+
+            trend_inputs: list[TrendRunInput] = []
+            for row in rows:
+                record = self._record_from_row(row, [])
+                statuses, goal_scores, severities, critical_keys = metadata.get(
+                    row.run_id,
+                    ([], [], [], set()),
+                )
+                trend_inputs.append(
+                    TrendRunInput(
+                        run_id=row.run_id,
+                        pack_id=row.pack_id,
+                        agent_label=row.agent_label,
+                        agent_version=row.agent_version,
+                        lifecycle_status=(
+                            "completed"
+                            if row.lifecycle_status == TestRunLifecycleStatus.COMPLETED.value
+                            else "error"
+                        ),
+                        created_at=_require_utc(row.created_at).isoformat(),
+                        is_baseline=baseline_id == row.run_id,
+                        scenario_ids=tuple(
+                            scenario.scenario_id for scenario in record.pack.scenarios
+                        ),
+                        statuses=tuple(statuses),
+                        goal_scores=tuple(goal_scores),
+                        severities=tuple(severities),
+                        critical_failure_keys=frozenset(critical_keys),
+                    )
+                )
+
+        return build_run_trends(pack_id, trend_inputs)
+
     def get_comparison(self, run_id: UUID) -> RegressionComparisonResponse:
         with self._sessions() as session:
             row = self._require_run_row(session, run_id)
@@ -283,12 +330,8 @@ class SqlRunStore:
                         baseline_row, self._results_for(session, baseline_run_id)
                     )
                 else:
-                    # Foreign keys should prevent this; treat a dangling mapping
-                    # as "no baseline" rather than failing the request.
                     baseline_run_id = None
 
-            # Only an actual baseline-vs-current comparison needs the current
-            # run's full payloads; the other outcomes are decided from metadata.
             record = self._record_from_row(
                 row,
                 self._results_for(session, run_id) if baseline_record is not None else [],
@@ -310,8 +353,6 @@ class SqlRunStore:
             current = self._record_from_row(
                 current_row, self._results_for(session, current_run_id)
             )
-            # Reads the baseline table only to label the summaries; explicit
-            # comparison never consults or mutates baseline assignment.
             baselines = self._baselines_for(
                 session, [reference_row.pack_id, current_row.pack_id]
             )
@@ -375,6 +416,35 @@ class SqlRunStore:
         grouped: dict[UUID, list[RunStatus]] = {}
         for run_id, status in rows:
             grouped.setdefault(run_id, []).append(RunStatus(status))
+        return grouped
+
+    @staticmethod
+    def _trend_metadata_for(
+        session: Session,
+        run_ids: Sequence[UUID],
+    ) -> dict[UUID, tuple[list[RunStatus], list[int], list[Severity], set[str]]]:
+        if not run_ids:
+            return {}
+        rows = session.execute(
+            select(
+                ScenarioResultRow.run_id,
+                ScenarioResultRow.status,
+                ScenarioResultRow.goal_score,
+                ScenarioResultRow.severity,
+                ScenarioResultRow.critical_failure_keys,
+            )
+            .where(ScenarioResultRow.run_id.in_(run_ids))
+            .order_by(ScenarioResultRow.run_id, ScenarioResultRow.position)
+        )
+        grouped: dict[UUID, tuple[list[RunStatus], list[int], list[Severity], set[str]]] = {}
+        for run_id, status, goal_score, severity, critical_keys in rows:
+            entry = grouped.setdefault(run_id, ([], [], [], set()))
+            entry[0].append(RunStatus(status))
+            entry[1].append(goal_score if isinstance(goal_score, int) else 0)
+            if isinstance(severity, str):
+                entry[2].append(Severity(severity))
+            if isinstance(critical_keys, list):
+                entry[3].update(key for key in critical_keys if isinstance(key, str))
         return grouped
 
     @staticmethod
