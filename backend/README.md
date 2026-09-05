@@ -55,7 +55,10 @@ Schema changes are owned by Alembic. Railway executes `alembic upgrade head` dur
 
 - `insurance-v1` — 10 Turkish insurance scenarios, built-in demo or external HTTP
 - `ecommerce-v1` — 4 Turkish e-commerce scenarios, external HTTP only
-- `customer-service-core-v1` — typed 14-scenario cross-vertical suite, external HTTP only
+- `ajoop-v1` — 8 Turkish portfolio-agent reliability scenarios, external HTTP only
+- `customer-service-core-v1` — typed 14-scenario insurance + e-commerce suite, external HTTP only
+
+`ajoop-v1` uses the same generic external HTTP contract as every other external agent. It intentionally declares no fake tool calls because AJOOP currently returns `tool_events: []`; structurally scoreable behavior is expressed through response contracts and loop detection. The `customer-service-core-v1` suite remains unchanged and does not absorb the project-specific AJOOP pack.
 
 All collections use the same runner, deterministic evaluator, stores, trends and readiness policy.
 
