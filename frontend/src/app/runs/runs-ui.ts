@@ -48,6 +48,11 @@ export const MODE_OPTIONS: { value: AgentMode; label: string; note: string }[] =
   },
 ];
 
+export const TARGET_LABELS: Record<AgentTarget, string> = {
+  built_in_demo: "Built-in Demo",
+  external_http: "External HTTP",
+};
+
 export const LIFECYCLE_LABELS: Record<RunLifecycleStatus, string> = {
   queued: "Queued",
   running: "Running",
@@ -157,6 +162,17 @@ export function eventTime(timestamp: string): string {
     minute: "2-digit",
     second: "2-digit",
   }).format(new Date(timestamp));
+}
+
+/**
+ * Open a scenario on the evidence that answers the first question about it.
+ *
+ * For a failed scenario that is "what went wrong", so Failures leads. Passing and
+ * errored scenarios still open on Checks, which is where their evidence lives.
+ * Checks is never removed - it stays one click away for every scenario.
+ */
+export function defaultDetailTab(status: ScenarioRunStatus): DetailTab {
+  return status === "fail" ? "failures" : "checks";
 }
 
 export function resultSelection(results: ScenarioResultSummary[]): string | null {

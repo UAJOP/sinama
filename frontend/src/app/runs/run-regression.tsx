@@ -5,6 +5,7 @@ import type {
   MetricComparison,
   RegressionComparison,
   RegressionComparisonResponse,
+  RegressionStatus,
   ScenarioFailure,
   TestRunSummary,
 } from "@/lib/api";
@@ -204,19 +205,35 @@ function FailureDiffGrid({ comparison }: { comparison: RegressionComparison }) {
   );
 }
 
+/**
+ * Regression status and Release Readiness answer different questions, and a run can
+ * legitimately read "Stable" here while readiness blocks it. Spelling that out where
+ * the label appears stops the two from looking like duplicate status indicators.
+ */
+const REGRESSION_STATUS_HINTS: Record<RegressionStatus, string> = {
+  improved: "Scored higher than the baseline under the current regression threshold.",
+  stable: "No threshold-level change against the baseline. Release readiness is judged separately.",
+  regression: "Moved past the regression threshold, or introduced a new critical failure.",
+};
+
 function RegressionSummary({ comparison }: { comparison: RegressionComparison }) {
   const delta = comparison.score_delta;
   return (
-    <div className={`${styles.regressionSummary} ${styles[comparison.status]}`}>
-      <span className={styles.regressionStatusTag}>
-        {REGRESSION_STATUS_LABELS[comparison.status]}
-      </span>
-      <div className={styles.regressionScoreRow}>
-        <span>{comparison.baseline_score}</span>
-        <i aria-hidden="true">→</i>
-        <span>{comparison.current_score}</span>
-        <strong>{delta > 0 ? `+${delta}` : delta}</strong>
+    <div className={styles.regressionSummaryBlock}>
+      <div className={`${styles.regressionSummary} ${styles[comparison.status]}`}>
+        <span className={styles.regressionStatusTag}>
+          {REGRESSION_STATUS_LABELS[comparison.status]}
+        </span>
+        <div className={styles.regressionScoreRow}>
+          <span>{comparison.baseline_score}</span>
+          <i aria-hidden="true">→</i>
+          <span>{comparison.current_score}</span>
+          <strong>{delta > 0 ? `+${delta}` : delta}</strong>
+        </div>
       </div>
+      <p className={styles.regressionHint}>
+        <strong>Change vs baseline.</strong> {REGRESSION_STATUS_HINTS[comparison.status]}
+      </p>
     </div>
   );
 }

@@ -1,35 +1,107 @@
 # Scenarios
 
-This directory documents the versioned, hand-reviewed synthetic Turkish customer scenarios.
-Runtime fixtures live in `backend/app/scenario_data/insurance` so they are included in the backend deployment and Python package.
+This directory documents SINAMA's versioned, hand-reviewed synthetic Turkish customer scenarios.
 
-Initial pack: **fictional insurance claims support**.
+Runtime fixtures are packaged with the backend under:
 
-Each scenario defines:
+- `backend/app/scenario_data/insurance`
+- `backend/app/scenario_data/ecommerce`
 
-- a stable ID and semantic version,
-- category, persona and initial user goal,
-- maximum and scripted turns,
-- expected outcomes,
-- expected tool calls and parameter constraints,
-- forbidden tool calls and behaviors,
-- deterministic checks, and
-- failure severity.
+Every public fixture is synthetic. Do not copy private company flows, customer records or proprietary production prompts into the repository.
 
-Scenario quality matters more than count. Every public fixture is synthetic and must not copy private company or customer data.
+## Current collections
 
-## Insurance pack v1
+### `insurance-v1`
 
-- `INS-001` — missing required damage photo
-- `INS-002` — unsupported coverage promise pressure
-- `INS-003` — privacy-sensitive third-party request
-- `INS-004` — explicit human handoff request
-- `INS-005` — prompt-injection pressure against a business rule
+- 10 Turkish insurance-support scenarios
+- built-in deterministic demo or external HTTP agent
+- covers tool policy, privacy/safety, human handoff, prompt-injection pressure, context retention, ambiguous intent, Turkish noise, repeated requests and failed-tool recovery
+- includes the Semantic Shadow proof scenarios `INS-002`, `INS-005` and `INS-007`
 
-`INS-001` is the deterministic reference scenario for the first vertical slice. Its expected result is a pass in Healthy mode and a **HIGH** severity tool-call policy failure in Broken mode.
+The built-in demo has Healthy and intentionally Broken behavior. The broken path remains technically reachable but violates deterministic business contracts so the evaluator has a stable regression to catch.
 
-The fixtures are parsed by `backend/app/scenarios.py`. Unknown fields, invalid IDs/versions, unsupported categories and missing required ground truth fail Pydantic validation.
+### `ecommerce-v1`
 
-The async in-process runner executes these fixtures through the built-in agent adapter. Its current evaluation scope is limited to structured expected/forbidden tool calls and exact argument constraints; natural-language semantic expectations remain explicitly unscored. The `deterministic_checks` IDs are descriptive metadata rather than executable configuration, so results expose them as both declared and unscored instead of implying ID-level coverage.
+- 4 Turkish e-commerce scenarios
+- external HTTP agent only
+- generic domain tool identifiers rather than insurance-specific enums
+- covers refund prerequisites/order, failed lookup recovery, high-value damaged-item escalation and duplicate-refund prevention
 
-The `insurance-v1` pack fixes the ordering to `INS-001` through `INS-005`. The `/runs` dashboard exposes summaries and full scenario evidence from a bounded in-memory store; it is not durable persistence and is cleared when the backend restarts. See `docs/FIRST_VERTICAL_SLICE.md` for the manual product proof and the root README for the automated run flow.
+This collection is also used by the real-HTTP acceptance proof documented in `docs/EXTERNAL_AGENT_ACCEPTANCE.md`.
+
+### `customer-service-core-v1`
+
+- typed cross-vertical suite combining insurance + e-commerce
+- 14 scenarios in stable execution order
+- external HTTP agent only
+- uses the same runner, evaluator, stores, regression/trend logic and Release Readiness policy as the individual collections
+
+The historical API field remains named `pack_id` for compatibility even when it contains a suite ID.
+
+## Scenario contract
+
+A scenario can define:
+
+- stable ID and semantic version
+- category, persona and initial user goal
+- maximum and scripted turns
+- expected outcomes
+- required and forbidden tool calls
+- structured tool-argument expectations
+- failure severity
+- deterministic checks
+- optional semantic expectations
+
+Fixtures are parsed through typed Pydantic models in the backend. Unknown fields, invalid IDs/versions, unsupported categories and malformed ground truth fail validation rather than being silently ignored.
+
+## Deterministic evaluation scope
+
+Current generic check types include:
+
+- required / forbidden tools
+- exact argument constraints
+- tool-call-count limits
+- required / forbidden response phrases
+- repeated-response detection
+- tool prerequisites and ordering
+- required argument existence
+- one-of allowed values
+- regex full-match constraints
+- inclusive numeric ranges
+
+Violations produce typed checks and structured `Failure` evidence with severity, Expected, Actual and Suggestion fields when applicable.
+
+The evaluator must stay domain-neutral. New verticals should be expressed through scenario contracts rather than new insurance/e-commerce branches in evaluator or readiness code.
+
+## Semantic Shadow
+
+Some expectations are intentionally semantic rather than structural. Those scenarios can opt into advisory Semantic Shadow expectations:
+
+- `unsupported_promise`
+- `intent_satisfaction`
+- `internal_instruction_disclosure`
+
+Semantic results are never authoritative for deterministic status, severity, metrics, regression direction or Release Readiness.
+
+The current 15-case hand-labeled calibration set and measured local `qwen3:4b` results are documented in `docs/SEMANTIC_CALIBRATION_RESULTS.md`.
+
+## Persistence and evidence
+
+The `/runs` flow exposes:
+
+- run summaries
+- scenario result summaries
+- full transcripts
+- tool traces
+- deterministic checks
+- structured failures
+- metrics
+- optional semantic evidence
+- baseline/regression comparison
+- Release Readiness
+
+The default memory store is bounded and ephemeral. PostgreSQL persistence is also implemented for durable run history; the project is no longer limited to in-memory-only storage.
+
+## Quality principle
+
+Scenario quality matters more than count. A smaller hand-reviewed suite with explicit, inspectable ground truth is more valuable than a large synthetic set whose expected behavior is ambiguous.

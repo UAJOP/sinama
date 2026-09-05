@@ -102,7 +102,9 @@
 .modeOptions input { accent-color: var(--green); }
 .modeOptions span { display: grid; min-width: 0; gap: 2px; }
 .modeOptions strong { font-size: 11px; }
-.modeOptions small { overflow: hidden; color: #91aaa2; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+/* Wraps rather than truncates: the disabled reason ("Not supported by this
+   collection") must stay readable at narrow widths. */
+.modeOptions small { color: #91aaa2; font-size: 9px; line-height: 1.4; overflow-wrap: anywhere; }
 .modeOptions .modeSelected { border-color: #3c7b65; color: var(--green); background: #123126; }
 .modeOptions .modeSelected small { color: #b0c8c0; }
 .modeField:disabled label { cursor: not-allowed; opacity: 0.58; }
@@ -652,3 +654,59 @@
 @media (prefers-reduced-motion: reduce) {
   .lifecycle.running i, .loadingBlock > span { animation-duration: 0.01ms; animation-iteration-count: 1; }
 }
+
+/* --- Product story clarity (Brief 3) --- */
+
+/* Run identity: what was tested, directly under the collection name. */
+.runSubject {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 7px;
+  margin: 5px 0 0;
+  color: #7f9c93;
+  font: 700 9px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+.runSubjectVersion { color: var(--green); overflow-wrap: anywhere; }
+
+/* Regression status carries its own explanation so it is never read as a
+   duplicate of the Release Readiness verdict. */
+.regressionSummaryBlock { display: grid; gap: 8px; }
+.regressionHint {
+  margin: 0;
+  padding: 0 2px;
+  color: #7f9c93;
+  font-size: 10px;
+  line-height: 1.55;
+}
+.regressionHint strong { color: #b6c7c2; }
+
+/* Failures -> Tool Trace hand-off. */
+.traceJump {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 9px 11px;
+  border: 1px solid #3a3026;
+  border-radius: 9px;
+  color: #c6b294;
+  background: #191309;
+  font-size: 10px;
+  line-height: 1.5;
+}
+.traceJump button {
+  flex-shrink: 0;
+  padding: 6px 11px;
+  border: 1px solid #5c4a2f;
+  border-radius: 999px;
+  color: #e2c795;
+  background: #241a0c;
+  cursor: pointer;
+  font: 700 9px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-transform: uppercase;
+}
+.traceJump button:hover { border-color: #806a42; color: #f0dcb2; }

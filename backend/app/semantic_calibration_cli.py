@@ -8,7 +8,13 @@ from pathlib import Path
 from app.config import Settings
 from app.semantic_calibration import CalibrationCase, load_calibration_set
 from app.semantic_calibration_runner import run_semantic_calibration
+from app.semantic_judge import SemanticJudge
 from app.semantic_judge_factory import build_semantic_judge
+from app.semantic_judge_local import (
+    DEFAULT_OLLAMA_BASE_URL,
+    LocalJudgeConfigurationError,
+    OllamaSemanticJudge,
+)
 
 _DEFAULT_OUTPUT = Path("reports/semantic-calibration.json")
 
@@ -37,6 +43,25 @@ def _parser() -> argparse.ArgumentParser:
         help="Run only this calibration case id. May be supplied multiple times.",
     )
     parser.add_argument(
+        "--local-ollama",
+        action="store_true",
+        help=(
+            "Calibrate against a local Ollama daemon instead of the configured cloud "
+            "provider. Requires no API key and performs no paid request. This is "
+            "calibration tooling only and never affects production semantic runs."
+        ),
+    )
+    parser.add_argument(
+        "--ollama-model",
+        default="qwen3:4b",
+        help="Local model tag to calibrate with (default: qwen3:4b).",
+    )
+    parser.add_argument(
+        "--ollama-url",
+        default=DEFAULT_OLLAMA_BASE_URL,
+        help=f"Loopback Ollama base URL (default: {DEFAULT_OLLAMA_BASE_URL}).",
+    )
+    parser.add_argument(
         "--output",
         type=Path,
         default=_DEFAULT_OUTPUT,
@@ -62,16 +87,27 @@ def main() -> int:
 
     try:
         settings = Settings()
-        judge = build_semantic_judge(settings)
-    except ValueError as error:
+        judge: SemanticJudge | None
+        if args.local_ollama:
+            # Built directly here on purpose: the local judge is deliberately absent
+            # from `build_semantic_judge`, so it can never serve a production run.
+            judge = OllamaSemanticJudge(
+                model=args.ollama_model,
+                timeout_seconds=settings.semantic_judge_local_timeout_seconds,
+                max_input_chars=settings.semantic_judge_max_input_chars,
+                base_url=args.ollama_url,
+            )
+        else:
+            judge = build_semantic_judge(settings)
+    except (LocalJudgeConfigurationError, ValueError) as error:
         print(f"Calibration configuration error: {error}", file=sys.stderr)
         return 2
 
     if judge is None:
         print(
-            "Semantic calibration is disabled. Set SINAMA_SEMANTIC_JUDGE_PROVIDER and the "
-            "provider key in your local environment before running this command. No provider "
-            "request was made.",
+            "Semantic calibration is disabled. Either pass --local-ollama for a zero-cost "
+            "local run, or set SINAMA_SEMANTIC_JUDGE_PROVIDER and the provider key in your "
+            "local environment. No provider request was made.",
             file=sys.stderr,
         )
         return 2
@@ -87,7 +123,11 @@ def main() -> int:
             judge,
             cases,
             repeats=args.repeats,
-            timeout_seconds=settings.semantic_judge_timeout_seconds,
+            timeout_seconds=(
+                settings.semantic_judge_local_timeout_seconds
+                if args.local_ollama
+                else settings.semantic_judge_timeout_seconds
+            ),
         )
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)

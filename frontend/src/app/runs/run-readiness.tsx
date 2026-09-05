@@ -29,7 +29,9 @@ const VERDICT_COPY: Record<
   blocked: {
     label: "BLOCKED",
     title: "Release blocked",
-    summary: "SINAMA found deterministic evidence that should block this agent version from release.",
+    summary:
+      "SINAMA found deterministic evidence that should block this agent version from release. " +
+      "This verdict comes from the run's own failures, separately from how it compares to the baseline.",
   },
 };
 
@@ -107,6 +109,8 @@ export function RunReadiness({ runId, reloadKey }: { runId: string | null; reloa
 
   if (!response) return null;
   const copy = VERDICT_COPY[response.verdict];
+  const blockers = response.reasons.filter((reason) => reason.level === "blocker").length;
+  const warnings = response.reasons.length - blockers;
 
   return (
     <section className={`${styles.card} ${styles[response.verdict]}`} aria-labelledby="readiness-title">
@@ -120,11 +124,28 @@ export function RunReadiness({ runId, reloadKey }: { runId: string | null; reloa
       <p className={styles.summary}>{copy.summary}</p>
 
       {response.reasons.length > 0 && (
-        <div className={styles.reasons}>
-          {response.reasons.map((reason, index) => (
-            <Reason reason={reason} key={`${reason.code}:${reason.scenario_id ?? "run"}:${index}`} />
-          ))}
-        </div>
+        <>
+          {/* Name the evidence count up front, so "blocked" never reads as a bare verdict. */}
+          <p className={styles.reasonCount}>
+            <strong>
+              {blockers} blocking {blockers === 1 ? "reason" : "reasons"}
+            </strong>
+            {warnings > 0 && (
+              <span>
+                {" · "}
+                {warnings} {warnings === 1 ? "warning" : "warnings"}
+              </span>
+            )}
+          </p>
+          <div className={styles.reasons}>
+            {response.reasons.map((reason, index) => (
+              <Reason
+                reason={reason}
+                key={`${reason.code}:${reason.scenario_id ?? "run"}:${index}`}
+              />
+            ))}
+          </div>
+        </>
       )}
     </section>
   );

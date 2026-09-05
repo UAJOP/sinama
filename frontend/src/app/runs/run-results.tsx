@@ -65,7 +65,7 @@ export function ResultList({
                 <strong>{result.scenario_id}</strong>
                 <small>{STATUS_LABELS[result.status]}</small>
               </span>
-              <b>{result.title}</b>
+              <b lang="tr">{result.title}</b>
               <span className={styles.resultMeta}>
                 {CATEGORY_LABELS[result.category]}
                 {result.severity && <> · {SEVERITY_LABELS[result.severity]}</>}
@@ -102,7 +102,7 @@ export function ResultDetail({
         <div>
           <p className="eyebrow">{CATEGORY_LABELS[summary.category]}</p>
           <h2 id="scenario-detail-title">
-            {summary.scenario_id} · {summary.title}
+            {summary.scenario_id} · <span lang="tr">{summary.title}</span>
           </h2>
         </div>
         <span className={`${styles.statusPill} ${styles[summary.status]}`}>
@@ -143,17 +143,32 @@ export function ResultDetail({
             {error}
           </div>
         ) : detail ? (
-          <DetailTabContent activeTab={activeTab} detail={detail} />
+          <DetailTabContent activeTab={activeTab} detail={detail} onTabChange={onTabChange} />
         ) : null}
       </div>
     </section>
   );
 }
 
-function DetailTabContent({ activeTab, detail }: { activeTab: DetailTab; detail: ScenarioRunResult }) {
+function DetailTabContent({
+  activeTab,
+  detail,
+  onTabChange,
+}: {
+  activeTab: DetailTab;
+  detail: ScenarioRunResult;
+  onTabChange: (tab: DetailTab) => void;
+}) {
   if (activeTab === "checks") return <ChecksView checks={detail.checks} error={detail.error} />;
   if (activeTab === "metrics") return <MetricsView metrics={detail.metrics} />;
-  if (activeTab === "failures") return <FailuresView failures={detail.failures} />;
+  if (activeTab === "failures")
+    return (
+      <FailuresView
+        failures={detail.failures}
+        offendingEventCount={offendingEventIds(detail).size}
+        onShowTrace={() => onTabChange("trace")}
+      />
+    );
   if (activeTab === "semantic") return <SemanticShadowView detail={detail} />;
   if (activeTab === "transcript") return <TranscriptView detail={detail} />;
   if (activeTab === "trace") return <ToolTraceView detail={detail} />;
@@ -181,7 +196,15 @@ function MetricsView({ metrics }: { metrics: MetricScore[] }) {
   );
 }
 
-function FailuresView({ failures }: { failures: Failure[] }) {
+function FailuresView({
+  failures,
+  offendingEventCount,
+  onShowTrace,
+}: {
+  failures: Failure[];
+  offendingEventCount: number;
+  onShowTrace: () => void;
+}) {
   const [filter, setFilter] = useState<FailureFilter>("all");
   const filtered =
     filter === "all" ? failures : failures.filter((failure) => failure.severity === filter);
@@ -190,6 +213,17 @@ function FailuresView({ failures }: { failures: Failure[] }) {
 
   return (
     <div>
+      {offendingEventCount > 0 && (
+        <p className={styles.traceJump}>
+          <span>
+            {offendingEventCount} offending tool{" "}
+            {offendingEventCount === 1 ? "event is" : "events are"} highlighted in the trace.
+          </span>
+          <button type="button" onClick={onShowTrace}>
+            View in Tool Trace
+          </button>
+        </p>
+      )}
       <div className={styles.failureFilters} role="tablist" aria-label="Filter failures by severity">
         {FAILURE_FILTERS.map((option) => (
           <button
@@ -373,20 +407,25 @@ function TranscriptView({ detail }: { detail: ScenarioRunResult }) {
           <span>
             {turn.role === "user" ? "USER" : "AGENT"} · {turn.sequence}
           </span>
-          <p>{turn.content}</p>
+          <p lang="tr">{turn.content}</p>
         </li>
       ))}
     </ol>
   );
 }
 
-function ToolTraceView({ detail }: { detail: ScenarioRunResult }) {
-  const offendingIds = new Set(
+/** Tool events a failed deterministic check pointed at as the offending evidence. */
+function offendingEventIds(detail: ScenarioRunResult): Set<string> {
+  return new Set(
     detail.checks
       .filter((check) => check.status === "fail")
       .map((check) => check.evidence.offending_event?.id)
       .filter((id): id is string => Boolean(id)),
   );
+}
+
+function ToolTraceView({ detail }: { detail: ScenarioRunResult }) {
+  const offendingIds = offendingEventIds(detail);
   if (detail.tool_trace.length === 0)
     return <p className={styles.emptyTab}>No tool calls were observed.</p>;
   return (
