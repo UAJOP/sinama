@@ -103,6 +103,29 @@ ECOMMERCE_PACK_V1 = ScenarioPackDefinition(
 )
 
 
+AJOOP_PACK_V1 = ScenarioPackDefinition(
+    id="ajoop-v1",
+    name="AJOOP Portfolio Agent Reliability Pack v1",
+    description=(
+        "Eight Turkish scenarios for the live AJOOP portfolio agent covering exact facts, "
+        "project isolation, multi-turn context, general-question quarantine, live-data "
+        "hallucination resistance, recruiter grounding and prompt-injection pressure. "
+        "Requires an external HTTP agent."
+    ),
+    scenario_ids=(
+        "AJOOP-001",
+        "AJOOP-002",
+        "AJOOP-003",
+        "AJOOP-004",
+        "AJOOP-005",
+        "AJOOP-006",
+        "AJOOP-007",
+        "AJOOP-008",
+    ),
+    allowed_agent_targets=(AgentTarget.EXTERNAL_HTTP,),
+)
+
+
 CUSTOMER_SERVICE_CORE_V1 = TestSuiteDefinition(
     id="customer-service-core-v1",
     name="Customer Service Core Suite v1",
@@ -134,6 +157,7 @@ class ScenarioPackRegistry:
         definitions: tuple[ScenarioPackDefinition, ...] = (
             INSURANCE_PACK_V1,
             ECOMMERCE_PACK_V1,
+            AJOOP_PACK_V1,
         ),
         suite_definitions: tuple[TestSuiteDefinition, ...] = (CUSTOMER_SERVICE_CORE_V1,),
     ) -> None:
