@@ -94,3 +94,13 @@
   .badge { width: fit-content; }
   .reason { grid-template-columns: 1fr; }
 }
+
+/* Evidence count sits above the reasons so the verdict never reads as a bare label. */
+.reasonCount {
+  margin: 0 0 10px;
+  color: #93a8a2;
+  font: 700 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.reasonCount strong { color: #d6e2de; }
