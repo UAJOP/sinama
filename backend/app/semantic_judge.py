@@ -11,6 +11,8 @@ from app.models import StrictModel
 
 SEMANTIC_JUDGE_MAX_EXPECTATIONS = 8
 SEMANTIC_JUDGE_MAX_ASSISTANT_TURNS = 20
+SEMANTIC_JUDGE_MAX_REASON_CHARS = 1_000
+SEMANTIC_REASON_TRUNCATION_MARKER = "…[truncated]"
 
 
 class SemanticExpectationType(StrEnum):
@@ -61,7 +63,7 @@ class SemanticJudgeCheck(StrictModel):
     expectation_id: str
     type: SemanticExpectationType
     verdict: SemanticVerdict
-    reason: str = Field(min_length=1, max_length=1_000)
+    reason: str = Field(min_length=1, max_length=SEMANTIC_JUDGE_MAX_REASON_CHARS)
     assistant_turns: list[int] = Field(default_factory=list, max_length=10)
 
 
@@ -155,6 +157,21 @@ SEMANTIC_OUTPUT_SCHEMA = {
 }
 
 
+def _bounded_reason(reason: str) -> str:
+    """Cap advisory prose instead of discarding the verdict it explains.
+
+    ``reason`` is explanatory text; ``verdict`` is the only decision-bearing field.
+    A verbose but otherwise schema-valid provider response therefore gets its prose
+    trimmed and visibly marked, rather than costing us the whole evaluation. An
+    empty reason is still a contract violation and is rejected by field validation.
+    """
+
+    if len(reason) <= SEMANTIC_JUDGE_MAX_REASON_CHARS:
+        return reason
+    keep = SEMANTIC_JUDGE_MAX_REASON_CHARS - len(SEMANTIC_REASON_TRUNCATION_MARKER)
+    return reason[:keep] + SEMANTIC_REASON_TRUNCATION_MARKER
+
+
 def build_semantic_checks(
     request: SemanticJudgeRequest,
     provider_output: ProviderOutput,
@@ -187,7 +204,7 @@ def build_semantic_checks(
                     expectation_id=item.expectation_id,
                     type=expectation.type,
                     verdict=item.verdict,
-                    reason=item.reason,
+                    reason=_bounded_reason(item.reason),
                     assistant_turns=item.assistant_turns,
                 )
             )

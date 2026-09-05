@@ -12,6 +12,8 @@ from pydantic import SecretStr
 
 from app.config import SemanticJudgeProvider, Settings
 from app.semantic_judge import (
+    SEMANTIC_JUDGE_MAX_REASON_CHARS,
+    SEMANTIC_REASON_TRUNCATION_MARKER,
     OpenAISemanticJudge,
     SemanticEvaluationStatus,
     SemanticExpectation,
@@ -371,3 +373,33 @@ def test_openai_provider_requires_a_runtime_key_and_never_hard_codes_one() -> No
     assert built.provider == "openai"
     assert FAKE_KEY not in repr(configured)
     assert FAKE_KEY not in str(configured.semantic_judge_api_key)
+
+
+def test_overlong_reason_is_bounded_for_the_cloud_adapter_too() -> None:
+    """The reason cap is applied in the shared contract, so both adapters agree.
+
+    `build_semantic_checks` is shared precisely so one provider cannot accept a
+    weaker contract than the other. Bounding advisory prose therefore has to behave
+    identically here and in the local calibration adapter.
+    """
+
+    rambling = "The assistant hedged appropriately. " * 100
+    assert len(rambling) > SEMANTIC_JUDGE_MAX_REASON_CHARS
+
+    report = evaluate(
+        structured_response(
+            [
+                {
+                    "expectation_id": "no_unsupported_payment_guarantee",
+                    "verdict": "fail",
+                    "reason": rambling,
+                    "assistant_turns": [2],
+                }
+            ]
+        )
+    )
+
+    assert report.status is SemanticEvaluationStatus.COMPLETED
+    assert report.checks[0].verdict is SemanticVerdict.FAIL
+    assert len(report.checks[0].reason) <= SEMANTIC_JUDGE_MAX_REASON_CHARS
+    assert report.checks[0].reason.endswith(SEMANTIC_REASON_TRUNCATION_MARKER)

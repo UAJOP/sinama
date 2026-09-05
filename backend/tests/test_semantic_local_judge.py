@@ -13,6 +13,8 @@ import pytest
 
 from app.config import SemanticJudgeProvider, Settings
 from app.semantic_judge import (
+    SEMANTIC_JUDGE_MAX_REASON_CHARS,
+    SEMANTIC_REASON_TRUNCATION_MARKER,
     SemanticEvaluationStatus,
     SemanticExpectation,
     SemanticExpectationType,
@@ -354,3 +356,72 @@ def test_local_judge_shares_the_same_validation_as_the_cloud_adapter() -> None:
     from app.semantic_judge import build_semantic_checks
 
     assert build_semantic_checks.__module__ == "app.semantic_judge"
+
+
+# --- Regression: an over-long advisory reason must not discard a valid verdict ---
+
+
+def test_overlong_advisory_reason_is_truncated_not_discarded() -> None:
+    """A verbose local model must not cost us the whole evaluation.
+
+    Reproduces measured qwen3:4b behaviour on the adversarial disclosure case: the
+    model emitted a 6.6k-character `reason` alongside a well-formed, schema-valid
+    verdict. `reason` is advisory prose, so rejecting the evaluation over its length
+    threw away the one decision-bearing field and turned a wrong verdict into an
+    indistinguishable provider error.
+    """
+
+    rambling = "Bu değerlendirme gerekçesi çok uzun. " * 200
+    assert len(rambling) > SEMANTIC_JUDGE_MAX_REASON_CHARS
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return ollama_response(
+            [
+                {
+                    "expectation_id": "no_unsupported_payment_guarantee",
+                    "verdict": "fail",
+                    "reason": rambling,
+                    "assistant_turns": [2],
+                }
+            ]
+        )
+
+    report = asyncio.run(judge(handler).evaluate(request()))
+
+    assert report.status is SemanticEvaluationStatus.COMPLETED
+    assert len(report.checks) == 1
+    check = report.checks[0]
+    # The verdict - the only decision-bearing field - must survive intact.
+    assert check.verdict is SemanticVerdict.FAIL
+    assert check.assistant_turns == [2]
+    # The prose is capped and visibly marked so nobody mistakes it for full output.
+    assert len(check.reason) <= SEMANTIC_JUDGE_MAX_REASON_CHARS
+    assert check.reason.endswith(SEMANTIC_REASON_TRUNCATION_MARKER)
+    assert check.reason.startswith("Bu değerlendirme gerekçesi")
+
+
+def test_reason_exactly_at_the_limit_is_left_untouched() -> None:
+    """Truncation must not mark prose that already fits."""
+
+    exact = "ç" * SEMANTIC_JUDGE_MAX_REASON_CHARS
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return ollama_response([{**valid_check(), "reason": exact}])
+
+    report = asyncio.run(judge(handler).evaluate(request()))
+
+    assert report.status is SemanticEvaluationStatus.COMPLETED
+    assert report.checks[0].reason == exact
+    assert SEMANTIC_REASON_TRUNCATION_MARKER not in report.checks[0].reason
+
+
+def test_empty_reason_is_still_rejected_as_a_contract_violation() -> None:
+    """Bounding advisory prose must not soften genuinely malformed output."""
+
+    def handler(_: httpx.Request) -> httpx.Response:
+        return ollama_response([{**valid_check(), "reason": ""}])
+
+    report = asyncio.run(run_semantic_shadow(judge(handler), request(), timeout_seconds=5.0))
+
+    assert report.status is SemanticEvaluationStatus.ERROR
+    assert report.checks == []
