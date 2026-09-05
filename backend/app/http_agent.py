@@ -141,6 +141,13 @@ def _is_public_address(value: str) -> bool:
     return address.is_global
 
 
+def _select_pinned_address(addresses: Sequence[str]) -> str:
+    parsed_addresses = [ipaddress.ip_address(address) for address in addresses]
+    ipv4_address = next((address for address in parsed_addresses if address.version == 4), None)
+    selected = ipv4_address or parsed_addresses[0]
+    return str(selected)
+
+
 async def validate_external_agent_endpoint(
     endpoint_url: str,
     *,
@@ -200,7 +207,7 @@ async def validate_external_agent_endpoint(
     if not addresses or any(not _is_public_address(address) for address in addresses):
         raise UnsafeAgentEndpointError("External agent endpoint is not allowed.")
 
-    resolved_address = str(ipaddress.ip_address(addresses[0]))
+    resolved_address = _select_pinned_address(addresses)
     original_host = normalized_url.raw_host.decode("ascii")
     return ValidatedAgentEndpoint(
         request_url=normalized_url.copy_with(host=resolved_address),
