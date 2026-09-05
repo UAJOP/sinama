@@ -194,3 +194,6 @@ The calibration runner makes measurement reproducible; it does **not** establish
 - a larger reviewed dataset if the initial results justify further investment
 
 Until that evidence is strong enough, semantic output stays shadow-only.
+
+Measured results for the local `qwen3:4b` judge on this dataset are recorded in
+[SEMANTIC_CALIBRATION_RESULTS.md](SEMANTIC_CALIBRATION_RESULTS.md).
