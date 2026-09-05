@@ -213,7 +213,7 @@ async def validate_external_agent_endpoint(
 class HttpAgentAdapter:
     endpoint_url: str
     bearer_token: SecretStr | None = None
-    timeout_seconds: float = 4.0
+    timeout_seconds: float = 60.0
     max_response_bytes: int = 262_144
     production: bool = False
     resolver: AddressResolver = resolve_host_addresses
@@ -221,8 +221,8 @@ class HttpAgentAdapter:
     configuration_label: str = "external_http"
 
     def __post_init__(self) -> None:
-        if self.timeout_seconds <= 0 or self.timeout_seconds > 5:
-            raise ValueError("timeout_seconds must be greater than zero and at most five")
+        if self.timeout_seconds <= 0 or self.timeout_seconds > 60:
+            raise ValueError("timeout_seconds must be greater than zero and at most sixty")
         if self.max_response_bytes < 1_024 or self.max_response_bytes > 1_048_576:
             raise ValueError("max_response_bytes must be between 1024 and 1048576")
 
