@@ -27,7 +27,7 @@ class Settings(BaseSettings):
         default=None,
         validation_alias="RAILWAY_ENVIRONMENT_NAME",
     )
-    external_agent_timeout_seconds: float = Field(default=4.0, gt=0, le=5.0)
+    external_agent_timeout_seconds: float = Field(default=60.0, gt=0, le=60.0)
     external_agent_max_response_bytes: int = Field(
         default=262_144,
         ge=1_024,
