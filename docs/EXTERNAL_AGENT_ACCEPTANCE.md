@@ -112,24 +112,31 @@ Release Readiness on the regressed run: **BLOCKED**, with one
 `HIGH_FAILURE` blocker per failing scenario, each carrying scenario id, failure
 type, severity and a human-readable detail.
 
-### An honest note on the aggregate regression label
+### The two signals answer different questions
 
-The regressed run is **BLOCKED** by Release Readiness, yet its aggregate
-`RegressionStatus` is **STABLE**. That is what the current rules say:
-`compute_regression_status` escalates only on a new *critical* failure or a score
-move of at least `REGRESSION_THRESHOLD` (5), and two new high-severity failures
-cost 4 points here.
+The regressed run is **BLOCKED** by Release Readiness while its aggregate
+`RegressionStatus` is **STABLE**. That is not a contradiction — the two answer
+different questions:
 
-So the two signals disagree: readiness blocks, the rolled-up regression label does
-not. The per-failure evidence is fully present either way — only the summary label
-is soft.
+| Signal | Question it answers |
+| --- | --- |
+| `RegressionStatus` | *Did this run get materially worse than the baseline?* Scored as a baseline delta against `REGRESSION_THRESHOLD` (5), escalating early on a new critical failure. Here the defect costs 4 points, so the delta stays inside the threshold. |
+| Release Readiness | *Is this run releasable right now?* Judged on absolute deterministic evidence. Two new high-severity failures block it outright, regardless of the baseline. |
 
-This was **not** changed. Regression and readiness policy redesign are out of
-scope for this work, and the acceptance proof exists to validate existing policy
-rather than rewrite it. The behaviour is pinned by
+A run can therefore be both "not a large movement from baseline" and "not
+releasable" at the same time, which is exactly what happened here. The per-failure
+evidence is fully present in both paths; only the rolled-up regression label is
+coarse.
+
+It is still a plausible source of UX confusion — "STABLE" next to "BLOCKED" reads
+oddly on a dashboard even when both are correct — so it is worth a deliberate
+product decision about how the two are presented together.
+
+Nothing was changed here. Regression and readiness policy redesign are out of
+scope, and this proof exists to validate existing policy rather than rewrite it.
+The behaviour is pinned by
 `test_aggregate_regression_label_stays_stable_below_the_score_threshold`, written
 so that tightening the rule later fails that test and forces a conscious decision.
-It is worth a deliberate review.
 
 ## Security — production protections were not weakened
 

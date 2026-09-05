@@ -29,6 +29,13 @@ from uuid import UUID
 
 import httpx
 import pytest
+
+# Imported as a top-level module, matching `from conftest import ...` elsewhere in
+# this suite. `tests/` has no __init__.py, so pytest's default prepend import mode
+# puts `backend/tests` on sys.path; a `tests.` prefixed import only resolves when
+# the CWD happens to be on sys.path too, which is true for `python -m pytest` but
+# not for the bare `pytest` console script CI runs.
+from acceptance_agent_service import BehaviourVersion, running_demo_agent
 from pydantic import SecretStr
 
 from app.evaluator import EvaluationCategory, EvaluationCheckType
@@ -60,7 +67,6 @@ from app.test_runs import (
 from app.test_runs import (
     TestRunLifecycleStatus as LifecycleStatus,
 )
-from tests.acceptance_agent_service import BehaviourVersion, running_demo_agent
 
 COLLECTION_ID = "ecommerce-v1"
 # A public hostname, so the production policy performs its normal DNS + pinning
@@ -390,12 +396,14 @@ def test_baseline_comparison_identifies_the_new_failures() -> None:
 
 
 def test_aggregate_regression_label_stays_stable_below_the_score_threshold() -> None:
-    """Pins existing policy: the aggregate label and the readiness verdict diverge.
+    """Pins existing policy: the two signals answer different questions.
 
     Two new high-severity failures appear and Release Readiness blocks the run, yet
-    `RegressionStatus` is STABLE. That is what the current rules say:
-    `compute_regression_status` escalates only on a new *critical* failure or a
-    score move of at least REGRESSION_THRESHOLD (5), and this defect costs 4 points.
+    `RegressionStatus` is STABLE. Both are correct. Regression status measures the
+    *baseline delta* - `compute_regression_status` escalates only on a new critical
+    failure or a score move of at least REGRESSION_THRESHOLD (5), and this defect
+    costs 4 - while readiness measures whether the current run is *releasable* on
+    absolute evidence, which it is not.
 
     This test documents the behaviour rather than changing it - regression and
     readiness policy are out of scope here. It is deliberately written so that
