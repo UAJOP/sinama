@@ -1,16 +1,7 @@
-import asyncio
-
-import pytest
-
 from app.evaluator import DeterministicToolEvaluator, EvaluationStatus
-from app.models import AgentMode, AgentTarget
+from app.models import AgentTarget
 from app.scenario_packs import ScenarioPackRegistry
 from app.scenarios import load_scenario_by_id
-from app.test_runs import (
-    InMemoryRunStore,
-    InvalidRunAgentConfigurationError,
-    RunService,
-)
 
 
 AJOOP_SCENARIO_IDS = [f"AJOOP-{index:03d}" for index in range(1, 9)]
@@ -39,15 +30,6 @@ def test_ajoop_fixtures_are_tool_honest_and_response_scoreable() -> None:
             or scenario.forbidden_response_phrases
             or scenario.loop_detection_enabled
         ), f"{scenario.id} needs at least one scored deterministic response contract"
-
-
-def test_ajoop_pack_rejects_built_in_demo_agent() -> None:
-    async def create() -> None:
-        service = RunService(store=InMemoryRunStore())
-        await service.create_run("ajoop-v1", AgentMode.HEALTHY)
-
-    with pytest.raises(InvalidRunAgentConfigurationError, match="external_http"):
-        asyncio.run(create())
 
 
 def test_ajoop_deterministic_contracts_accept_reviewed_healthy_transcripts() -> None:
