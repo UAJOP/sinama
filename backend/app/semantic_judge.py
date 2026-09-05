@@ -110,18 +110,18 @@ class SemanticJudge(Protocol):
     async def evaluate(self, request: SemanticJudgeRequest) -> SemanticEvaluationReport: ...
 
 
-class _ProviderCheck(StrictModel):
+class ProviderCheck(StrictModel):
     expectation_id: str
     verdict: SemanticVerdict
     reason: str
     assistant_turns: list[int] = Field(default_factory=list)
 
 
-class _ProviderOutput(StrictModel):
-    checks: list[_ProviderCheck]
+class ProviderOutput(StrictModel):
+    checks: list[ProviderCheck]
 
 
-_OPENAI_OUTPUT_SCHEMA = {
+SEMANTIC_OUTPUT_SCHEMA = {
     "type": "object",
     "additionalProperties": False,
     "properties": {
@@ -153,6 +153,51 @@ _OPENAI_OUTPUT_SCHEMA = {
     },
     "required": ["checks"],
 }
+
+
+def build_semantic_checks(
+    request: SemanticJudgeRequest,
+    provider_output: ProviderOutput,
+) -> list[SemanticJudgeCheck]:
+    """Validate raw provider output against one semantic request.
+
+    Shared by every judge adapter so a second provider cannot silently accept a
+    weaker contract than the first: expectation coverage, duplicate ids, assistant
+    turn references and per-field limits are enforced in exactly one place.
+    """
+
+    expected_by_id = {item.id: item for item in request.expectations}
+    returned_ids = [item.expectation_id for item in provider_output.checks]
+    if len(returned_ids) != len(set(returned_ids)) or set(returned_ids) != set(expected_by_id):
+        raise SemanticJudgeError("Semantic judge response did not cover the expected rubric set.")
+
+    assistant_sequences = {
+        turn.sequence for turn in request.transcript if turn.role == "assistant"
+    }
+    checks: list[SemanticJudgeCheck] = []
+    for item in provider_output.checks:
+        if any(sequence not in assistant_sequences for sequence in item.assistant_turns):
+            raise SemanticJudgeError(
+                "Semantic judge response referenced an invalid assistant turn."
+            )
+        expectation = expected_by_id[item.expectation_id]
+        try:
+            checks.append(
+                SemanticJudgeCheck(
+                    expectation_id=item.expectation_id,
+                    type=expectation.type,
+                    verdict=item.verdict,
+                    reason=item.reason,
+                    assistant_turns=item.assistant_turns,
+                )
+            )
+        except ValidationError:
+            # Field-level violations the provider schema cannot express (such as an
+            # empty reason) are provider contract failures, not internal errors.
+            raise SemanticJudgeError(
+                "Semantic judge provider returned an invalid response."
+            ) from None
+    return checks
 
 
 class OpenAISemanticJudge:
@@ -205,7 +250,7 @@ class OpenAISemanticJudge:
                     "type": "json_schema",
                     "name": "sinama_semantic_shadow",
                     "strict": True,
-                    "schema": _OPENAI_OUTPUT_SCHEMA,
+                    "schema": SEMANTIC_OUTPUT_SCHEMA,
                 }
             },
             "max_output_tokens": 1_200,
@@ -236,49 +281,14 @@ class OpenAISemanticJudge:
         try:
             payload_json = response.json()
             output_text = self._extract_output_text(payload_json)
-            provider_output = _ProviderOutput.model_validate_json(output_text)
+            provider_output = ProviderOutput.model_validate_json(output_text)
             usage = self._usage_from_response(payload_json)
         except (ValueError, TypeError, ValidationError, json.JSONDecodeError):
             raise SemanticJudgeError(
                 "Semantic judge provider returned an invalid response."
             ) from None
 
-        expected_by_id = {item.id: item for item in request.expectations}
-        returned_ids = [item.expectation_id for item in provider_output.checks]
-        if (
-            len(returned_ids) != len(set(returned_ids))
-            or set(returned_ids) != set(expected_by_id)
-        ):
-            raise SemanticJudgeError(
-                "Semantic judge response did not cover the expected rubric set."
-            )
-
-        assistant_sequences = {
-            turn.sequence for turn in request.transcript if turn.role == "assistant"
-        }
-        checks: list[SemanticJudgeCheck] = []
-        for item in provider_output.checks:
-            if any(sequence not in assistant_sequences for sequence in item.assistant_turns):
-                raise SemanticJudgeError(
-                    "Semantic judge response referenced an invalid assistant turn."
-                )
-            expectation = expected_by_id[item.expectation_id]
-            try:
-                checks.append(
-                    SemanticJudgeCheck(
-                        expectation_id=item.expectation_id,
-                        type=expectation.type,
-                        verdict=item.verdict,
-                        reason=item.reason,
-                        assistant_turns=item.assistant_turns,
-                    )
-                )
-            except ValidationError:
-                # Field-level violations the provider schema cannot express (such as an
-                # empty reason) are provider contract failures, not internal errors.
-                raise SemanticJudgeError(
-                    "Semantic judge provider returned an invalid response."
-                ) from None
+        checks = build_semantic_checks(request, provider_output)
 
         return SemanticEvaluationReport(
             status=SemanticEvaluationStatus.COMPLETED,
