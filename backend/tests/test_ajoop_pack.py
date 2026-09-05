@@ -3,7 +3,6 @@ from app.models import AgentTarget
 from app.scenario_packs import ScenarioPackRegistry
 from app.scenarios import load_scenario_by_id
 
-
 AJOOP_SCENARIO_IDS = [f"AJOOP-{index:03d}" for index in range(1, 9)]
 
 
