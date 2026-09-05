@@ -1,6 +1,6 @@
 # SINAMA — AI Agent Reliability Lab
 
-A Turkish-first reliability lab for testing customer-service AI agents before production through repeatable multi-turn scenarios, deterministic workflow evaluation and inspectable release evidence.
+A Turkish-first reliability lab for testing customer-service AI agents and other external AI agents before production through repeatable multi-turn scenarios, deterministic workflow evaluation and inspectable release evidence.
 
 ![Status: Live MVP](https://img.shields.io/badge/status-live%20MVP-58efaf) ![CI](https://github.com/UAJOP/sinama/actions/workflows/ci.yml/badge.svg) ![Next.js](https://img.shields.io/badge/frontend-Next.js-000000) ![FastAPI](https://img.shields.io/badge/backend-FastAPI-009688) ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-3776AB) ![License: MIT](https://img.shields.io/badge/license-MIT-blue)
 
@@ -8,13 +8,13 @@ A Turkish-first reliability lab for testing customer-service AI agents before pr
 
 ![SINAMA](docs/assets/readme/sinama-case-study-hero.webp)
 
-SINAMA executes hand-reviewed Turkish multi-turn scenarios against customer-service AI agents, captures transcripts and structured tool traces, deterministically evaluates workflow contracts, compares versions, tracks regressions and produces evidence-backed release-readiness verdicts.
+SINAMA executes hand-reviewed Turkish multi-turn scenarios against AI agents, captures transcripts and structured tool traces, deterministically evaluates behavioral/workflow contracts, compares versions, tracks regressions and produces evidence-backed release-readiness verdicts.
 
-The same runner/evaluator/store stack spans insurance and e-commerce plus a typed cross-vertical suite. An optional Semantic Shadow layer adds advisory evidence for genuinely semantic expectations without replacing deterministic ground truth.
+The same runner/evaluator/store stack spans insurance and e-commerce, a typed cross-vertical suite, and an external-only AJOOP portfolio-agent pack. An optional Semantic Shadow layer adds advisory evidence for genuinely semantic expectations without replacing deterministic ground truth.
 
 ## Why SINAMA exists
 
-A support agent can sound fluent while still:
+An AI agent can sound fluent while still:
 
 - calling the wrong tool,
 - calling a valid tool too early,
@@ -22,7 +22,8 @@ A support agent can sound fluent while still:
 - sending malformed or out-of-policy arguments,
 - duplicating a side effect,
 - failing to hand off correctly,
-- making an unsupported promise, or
+- making an unsupported promise,
+- mixing facts from separate projects, or
 - exposing internal instructions.
 
 The production question is not “does the chatbot answer?” It is **“does this agent version behave reliably enough to release?”**
@@ -63,12 +64,20 @@ That distinction — **successful execution but unsafe behavior** — is the cor
 - refund ordering, failed lookup recovery, high-value damaged-item escalation and duplicate-refund prevention
 - generic domain tools such as `lookup_order`, `refund_order` and `escalate_return_case`
 
+`ajoop-v1`
+
+- 8 hand-reviewed Turkish scenarios for the public AJOOP portfolio agent
+- external HTTP agent only
+- exact public fact grounding, Hospital Form/Appointments project isolation, multi-turn context retention, general-question quarantine, live-data hallucination resistance, grounded recruiter reasoning and prompt-injection/internal-instruction disclosure pressure
+- uses the normal external-agent contract and honestly returns no synthetic tool events when the target emits none
+
 `customer-service-core-v1`
 
 - typed suite composing insurance + e-commerce
 - stable 14-scenario execution order
 - external HTTP agent only
 - same runner, evaluator, stores, trends, regression and readiness policy
+- intentionally remains an insurance/e-commerce benchmark and does not absorb `ajoop-v1`
 
 See [Scenario collections and contracts](scenarios/README.md).
 
@@ -101,7 +110,7 @@ External agents use the same evidence pipeline as the built-in demo. The adapter
 - bounds timeout and response size
 - keeps bearer tokens ephemeral and out of run history/log/API responses
 
-Beyond `httpx.MockTransport` boundary tests, SINAMA now includes a **real TCP/HTTP engineering acceptance proof** using an independent deterministic test server. The proof reuses `ecommerce-v1`:
+Beyond `httpx.MockTransport` boundary tests, SINAMA includes a **real TCP/HTTP engineering acceptance proof** using an independent deterministic test server. The proof reuses `ecommerce-v1`:
 
 1. `healthy-v1` executes over a real socket and passes 4/4 scenarios.
 2. The healthy run becomes the baseline.
@@ -110,6 +119,8 @@ Beyond `httpx.MockTransport` boundary tests, SINAMA now includes a **real TCP/HT
 5. Release Readiness becomes `BLOCKED`.
 
 The acceptance harness does not weaken production SSRF controls and is not third-party vendor certification or production customer validation.
+
+`ajoop-v1` reuses that same public external-agent boundary. Its intended target is `https://ajoop.kaanbalci.com/sinama`; the pack does not add AJOOP-specific adapter logic or relax timeout/SSRF policy.
 
 See [External-agent acceptance evidence](docs/EXTERNAL_AGENT_ACCEPTANCE.md).
 
@@ -211,6 +222,7 @@ FastAPI API
         +--> Scenario Collection Registry
         |      +--> Insurance Pack
         |      +--> E-commerce Pack
+        |      +--> AJOOP External Pack
         |      +--> Cross-vertical Suite
         |
         +--> RunService --> AgentAdapter --> Agent Under Test
@@ -312,12 +324,13 @@ GitHub Actions runs the same gate on integration/release PRs.
 
 ## Next phase
 
-The current MVP feature, semantic-calibration, real-HTTP acceptance and Runs product-story passes are complete. Next work should focus on **release hygiene and portfolio evidence**, not feature count:
+The current MVP feature, semantic-calibration, real-HTTP acceptance and Runs product-story passes are complete. The new `ajoop-v1` pack is the first project-specific real-agent integration and should be validated against the public AJOOP endpoint before it is used as a baseline. After that, work should focus on **release hygiene and portfolio evidence**, not feature count:
 
-1. keep documentation aligned with the implementation and measured evidence
-2. run the full develop → main release/deployment checklist across CI, Railway, Vercel and the public domain
-3. capture/update portfolio screenshots for healthy baseline, structured failure evidence, offending Tool Trace, regression and BLOCKED readiness
-4. address maintenance/security items only when an actual warning or operational problem justifies them
+1. run `ajoop-v1` against the live AJOOP external endpoint and inspect transcript/failure/readiness evidence
+2. establish a baseline only from a reviewed acceptable AJOOP run
+3. keep documentation aligned with implementation and measured evidence
+4. capture/update portfolio screenshots for healthy baseline, structured failure evidence, regression and BLOCKED readiness
+5. address maintenance/security items only when an actual warning or operational problem justifies them
 
 ## Documentation
 

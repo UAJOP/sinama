@@ -12,12 +12,15 @@ def test_collection_selector_api_exposes_packs_and_suite() -> None:
     assert [item["id"] for item in payload] == [
         "insurance-v1",
         "ecommerce-v1",
+        "ajoop-v1",
         "customer-service-core-v1",
     ]
-    assert [item["kind"] for item in payload] == ["pack", "pack", "suite"]
+    assert [item["kind"] for item in payload] == ["pack", "pack", "pack", "suite"]
     assert payload[1]["allowed_agent_targets"] == ["external_http"]
-    assert payload[2]["included_pack_ids"] == ["insurance-v1", "ecommerce-v1"]
-    assert payload[2]["scenario_count"] == 14
+    assert payload[2]["allowed_agent_targets"] == ["external_http"]
+    assert payload[2]["scenario_count"] == 8
+    assert payload[3]["included_pack_ids"] == ["insurance-v1", "ecommerce-v1"]
+    assert payload[3]["scenario_count"] == 14
 
 
 def test_typed_test_suite_api_exposes_pack_composition() -> None:
@@ -48,6 +51,10 @@ def test_external_only_collections_reject_built_in_demo_runs() -> None:
             "/api/runs",
             json={"pack_id": "ecommerce-v1", "agent_target": "built_in_demo"},
         )
+        ajoop = client.post(
+            "/api/runs",
+            json={"pack_id": "ajoop-v1", "agent_target": "built_in_demo"},
+        )
         suite = client.post(
             "/api/runs",
             json={"pack_id": "customer-service-core-v1", "agent_target": "built_in_demo"},
@@ -55,6 +62,8 @@ def test_external_only_collections_reject_built_in_demo_runs() -> None:
 
     assert ecommerce.status_code == 422
     assert "external_http" in ecommerce.json()["detail"]
+    assert ajoop.status_code == 422
+    assert "external_http" in ajoop.json()["detail"]
     assert suite.status_code == 422
     assert "external_http" in suite.json()["detail"]
 
