@@ -137,7 +137,7 @@ def test_registry_exposes_stable_ecommerce_pack_and_cross_vertical_suite() -> No
     registry = ScenarioPackRegistry()
 
     packs = registry.list_packs()
-    assert [pack.id for pack in packs] == ["insurance-v1", "ecommerce-v1"]
+    assert [pack.id for pack in packs] == ["insurance-v1", "ecommerce-v1", "ajoop-v1"]
     ecommerce = packs[1]
     assert ecommerce.scenario_count == 4
     assert ecommerce.allowed_agent_targets == [AgentTarget.EXTERNAL_HTTP]
