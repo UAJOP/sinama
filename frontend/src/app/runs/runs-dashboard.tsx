@@ -36,6 +36,7 @@ import {
   RECENT_RUNS_LIMIT,
   RUN_VIEW_LABELS,
   TERMINAL_STATUSES,
+  defaultDetailTab,
   errorMessage,
   isAbortError,
   resultSelection,
@@ -316,9 +317,12 @@ export function RunsDashboard() {
       .then((payload) => {
         if (serial !== resultsSerial.current) return;
         const defaultSelection = resultSelection(payload.results);
+        const selectedSummary =
+          payload.results.find((item) => item.scenario_id === defaultSelection) ?? null;
         setRun(payload.run);
         setResults(payload.results);
         setSelectedScenarioId(defaultSelection);
+        setActiveTab(selectedSummary ? defaultDetailTab(selectedSummary.status) : "checks");
         setDetail(null);
         setDetailError(null);
         setIsLoadingDetail(defaultSelection !== null);
@@ -420,14 +424,18 @@ export function RunsDashboard() {
   );
 
   return (
-    <main className={styles.shell}>
+    // The Runs chrome is written in English while the document is Turkish-first.
+    // Declaring it keeps CSS `text-transform: uppercase` from applying Turkish
+    // casing rules, which rendered every "i" in a label as "İ" (TEST COLLECTİON).
+    // Turkish scenario data inside carries its own lang marker.
+    <main className={styles.shell} lang="en">
       <header className={styles.pageHeader}>
         <div>
           <p className="eyebrow">AUTOMATED EVALUATION</p>
           <h1>Test Runs</h1>
           <p>
-            Run the insurance pack against a built-in or external agent and inspect the same
-            deterministic evidence.
+            Run a reliability test collection against a built-in demo or external agent, inspect
+            the deterministic evidence behind every result, and compare it against a baseline.
           </p>
         </div>
         <span className={styles.storageNote}>LAST {RECENT_RUNS_LIMIT} RUNS</span>
@@ -584,11 +592,13 @@ export function RunsDashboard() {
                 results={results}
                 selectedScenarioId={selectedScenarioId}
                 onSelect={(scenarioId) => {
+                  const picked =
+                    results.find((item) => item.scenario_id === scenarioId) ?? null;
                   setSelectedScenarioId(scenarioId);
                   setDetail(null);
                   setDetailError(null);
                   setIsLoadingDetail(true);
-                  setActiveTab("checks");
+                  setActiveTab(picked ? defaultDetailTab(picked.status) : "checks");
                 }}
               />
               <ResultDetail

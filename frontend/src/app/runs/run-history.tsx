@@ -9,6 +9,7 @@ import styles from "./runs.module.css";
 import {
   LIFECYCLE_LABELS,
   REGRESSION_STATUS_LABELS,
+  TARGET_LABELS,
   runTimestamp,
 } from "./runs-ui";
 
@@ -63,18 +64,22 @@ export function RecentRuns({
                 disabled={disabled && !isActive}
                 onClick={() => onOpen(item)}
               >
+                {/* Collection leads: two runs of different collections must not
+                    look identical when scanning history. */}
                 <span className={styles.recentRunTop}>
-                  <strong>{item.agent_label}</strong>
+                  <strong>{item.pack_name}</strong>
                   {item.is_baseline && <em className={styles.baselineTag}>BASELINE</em>}
+                </span>
+                <span className={styles.recentRunMeta}>
+                  <span>{TARGET_LABELS[item.agent_target]}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>{LIFECYCLE_LABELS[item.lifecycle_status]}</span>
+                  <span aria-hidden="true">·</span>
+                  <span>{runTimestamp(item.created_at)}</span>
                 </span>
                 {item.agent_version && (
                   <span className={styles.versionTag}>{item.agent_version}</span>
                 )}
-                <span className={styles.recentRunMeta}>
-                  <span>{runTimestamp(item.created_at)}</span>
-                  <span aria-hidden="true">·</span>
-                  <span>{item.lifecycle_status}</span>
-                </span>
                 <span className={styles.recentRunCounts}>
                   {item.lifecycle_status === "completed" ? (
                     <>
@@ -112,7 +117,7 @@ export function EmptyRunState() {
           scenario evidence workflow.
         </p>
         <ul className={styles.emptyFacts}>
-          <li>10 synthetic Turkish scenarios</li>
+          <li>Multi-turn Turkish reliability scenarios</li>
           <li>Structured tool-contract evaluation</li>
           <li>No external API key required</li>
         </ul>
@@ -160,7 +165,19 @@ export function RunOverview({
         <div className={styles.runIdentity}>
           <div>
             <p className="eyebrow">RUN</p>
+            {/* What was tested, in one glance: collection, then the agent identity. */}
             <h2 id="run-overview-title">{run.pack_name}</h2>
+            <p className={styles.runSubject}>
+              <span>{run.pack_id}</span>
+              <span aria-hidden="true">·</span>
+              <span>{TARGET_LABELS[run.agent_target]}</span>
+              {run.agent_version && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <span className={styles.runSubjectVersion}>{run.agent_version}</span>
+                </>
+              )}
+            </p>
             <code>{run.run_id}</code>
           </div>
           <div className={styles.overviewBadges}>
@@ -204,25 +221,16 @@ export function RunOverview({
           ))}
         </div>
         <div className={styles.runMeta}>
-          <span>
-            TARGET{" "}
-            <strong>{run.agent_target === "external_http" ? "External HTTP" : "Built-in Demo"}</strong>
-          </span>
           {run.agent_target === "built_in_demo" && (
             <span>
               MODE <strong>{run.agent_mode === "healthy" ? "Healthy" : "Broken"}</strong>
             </span>
           )}
           <span>
-            PACK <strong>{run.pack_id}</strong>
+            STARTED <strong>{runTimestamp(run.created_at)}</strong>
           </span>
-          {run.agent_version && (
-            <span>
-              VERSION <strong>{run.agent_version}</strong>
-            </span>
-          )}
           <span>
-            OUTCOMES <strong>Observed results only</strong>
+            BASELINE <strong>{run.is_baseline ? "This run" : "Not this run"}</strong>
           </span>
           <span className={styles.baselineAction}>
             {run.is_baseline ? (
