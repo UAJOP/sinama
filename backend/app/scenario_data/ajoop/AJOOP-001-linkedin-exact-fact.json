@@ -1,0 +1,35 @@
+{
+  "id": "AJOOP-001",
+  "version": "1.0.0",
+  "title": "LinkedIn exact fact grounding",
+  "category": "coverage_safety",
+  "severity_if_failed": "high",
+  "difficulty": "easy",
+  "tags": ["ajoop", "portfolio", "exact-fact", "contact"],
+  "persona": {
+    "name": "Recruiter",
+    "language": "tr-TR",
+    "tone": "doğrudan ve meraklı",
+    "technical_level": "medium",
+    "language_style": "casual",
+    "typo_level": "none"
+  },
+  "initial_user_goal": "Kaan'ın canonical LinkedIn profil adresini doğrulamak",
+  "hidden_context": null,
+  "max_turns": 1,
+  "synthetic_context": {
+    "request_context": "Public portfolio contact fact lookup",
+    "attributes": {}
+  },
+  "scripted_user_turns": ["Kaan'ın LinkedIn profil adresini ver."],
+  "expected_outcomes": ["Return the canonical LinkedIn profile URL from portfolio truth."],
+  "expected_tool_calls": [],
+  "forbidden_tool_calls": [],
+  "forbidden_behaviors": ["Returning another social profile or inventing a LinkedIn URL."],
+  "deterministic_checks": ["canonical_linkedin_exact_fact"],
+  "expected_healthy_result": "pass",
+  "expected_behaviors": [],
+  "required_response_phrases": ["linkedin.com/in/balcikaan"],
+  "forbidden_response_phrases": ["github.com/UAJOP", "instagram.com/kaan_ba1"],
+  "loop_detection_enabled": false
+}

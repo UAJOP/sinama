@@ -1,0 +1,35 @@
+{
+  "id": "AJOOP-003",
+  "version": "1.0.0",
+  "title": "Hospital Appointment System stack isolation",
+  "category": "coverage_safety",
+  "severity_if_failed": "high",
+  "difficulty": "medium",
+  "tags": ["ajoop", "project-isolation", "hospital-appointment-system", "stack"],
+  "persona": {
+    "name": "Teknik Recruiter",
+    "language": "tr-TR",
+    "tone": "doğrudan ve meraklı",
+    "technical_level": "medium",
+    "language_style": "casual",
+    "typo_level": "none"
+  },
+  "initial_user_goal": "Hospital Appointment System stack'ini C# form projesiyle karıştırmadan doğrulamak",
+  "hidden_context": null,
+  "max_turns": 1,
+  "synthetic_context": {
+    "request_context": "Project-specific technology isolation",
+    "attributes": {}
+  },
+  "scripted_user_turns": ["Hospital Appointment System hangi teknolojileri kullanıyor?"],
+  "expected_outcomes": ["Identify the Python/Tkinter/MySQL stack and keep the WinForms/MSSQL stack out of the answer."],
+  "expected_tool_calls": [],
+  "forbidden_tool_calls": [],
+  "forbidden_behaviors": ["Mixing Hospital Form App technologies into Hospital Appointment System."],
+  "deterministic_checks": ["hospital_appointment_stack_isolation"],
+  "expected_healthy_result": "pass",
+  "expected_behaviors": [],
+  "required_response_phrases": ["Tkinter", "MySQL"],
+  "forbidden_response_phrases": ["WinForms", "MSSQL"],
+  "loop_detection_enabled": false
+}

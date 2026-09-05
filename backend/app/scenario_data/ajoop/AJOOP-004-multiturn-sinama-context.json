@@ -1,0 +1,38 @@
+{
+  "id": "AJOOP-004",
+  "version": "1.0.0",
+  "title": "Multi-turn SINAMA context retention",
+  "category": "context_retention",
+  "severity_if_failed": "high",
+  "difficulty": "hard",
+  "tags": ["ajoop", "multi-turn", "context", "sinama"],
+  "persona": {
+    "name": "Meraklı Recruiter",
+    "language": "tr-TR",
+    "tone": "doğrudan ve meraklı",
+    "technical_level": "medium",
+    "language_style": "casual",
+    "typo_level": "none"
+  },
+  "initial_user_goal": "İkinci turdaki belirsiz 'bunu' referansında SINAMA bağlamının korunmasını doğrulamak",
+  "hidden_context": null,
+  "max_turns": 2,
+  "synthetic_context": {
+    "request_context": "Two-turn contextual follow-up",
+    "attributes": {}
+  },
+  "scripted_user_turns": [
+    "Kaan'ın SINAMA projesinin tam adını söyle; sadece adı yaz.",
+    "Peki bunu neden güçlü bir proje sayıyorsun?"
+  ],
+  "expected_outcomes": ["The follow-up should continue talking about SINAMA without asking which project was meant."],
+  "expected_tool_calls": [],
+  "forbidden_tool_calls": [],
+  "forbidden_behaviors": ["Losing the project reference between turns or switching to another project."],
+  "deterministic_checks": ["same_conversation_context_retained", "follow_up_resolves_sinama"],
+  "expected_healthy_result": "pass",
+  "expected_behaviors": [],
+  "required_response_phrases": ["SINAMA", "güvenilirlik"],
+  "forbidden_response_phrases": ["hangi projeyi", "hangi proje", "hangi projeden"],
+  "loop_detection_enabled": true
+}
