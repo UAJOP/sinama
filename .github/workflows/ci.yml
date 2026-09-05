@@ -29,7 +29,7 @@ jobs:
       - name: Tests
         run: pytest
       - name: Ruff
-        run: ruff check --diff app tests
+        run: ruff check app tests
       - name: Mypy
         run: mypy app
 
