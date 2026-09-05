@@ -6,7 +6,11 @@ from app.evaluator import DeterministicToolEvaluator, EvaluationStatus
 from app.models import AgentMode, AgentTarget
 from app.scenario_packs import ScenarioPackRegistry
 from app.scenarios import load_scenario_by_id
-from app.test_runs import InMemoryRunStore, InvalidRunAgentConfigurationError, RunService
+from app.test_runs import (
+    InMemoryRunStore,
+    InvalidRunAgentConfigurationError,
+    RunService,
+)
 
 
 AJOOP_SCENARIO_IDS = [f"AJOOP-{index:03d}" for index in range(1, 9)]
