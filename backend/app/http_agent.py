@@ -20,7 +20,7 @@ from app.agent_adapters import (
     AgentTurnResult,
     MalformedAgentResponseError,
 )
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.models import JsonScalar, NonEmptyMessage, StrictModel, ToolEvent, ToolReference
 
 EndpointUrl = Annotated[
@@ -348,14 +348,18 @@ class HttpAgentAdapter:
         return bytes(body)
 
 
-def build_http_agent_adapter(configuration: ExternalAgentConfiguration) -> HttpAgentAdapter:
-    settings = get_settings()
+def build_http_agent_adapter(
+    configuration: ExternalAgentConfiguration,
+    *,
+    settings: Settings | None = None,
+) -> HttpAgentAdapter:
+    resolved = settings or get_settings()
     return HttpAgentAdapter(
         endpoint_url=configuration.endpoint_url,
         bearer_token=configuration.bearer_token,
-        timeout_seconds=settings.external_agent_timeout_seconds,
-        max_response_bytes=settings.external_agent_max_response_bytes,
-        production=settings.is_production,
+        timeout_seconds=resolved.external_agent_timeout_seconds,
+        max_response_bytes=resolved.external_agent_max_response_bytes,
+        production=resolved.is_production,
     )
 
 

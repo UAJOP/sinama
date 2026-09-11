@@ -10,7 +10,13 @@ import pytest
 from fastapi.testclient import TestClient
 from pydantic import SecretStr
 
-from app.agent_adapters import AgentAdapter, DemoAgentAdapter
+from app.agent_adapters import (
+    AgentAdapter,
+    AgentSession,
+    AgentTurnResult,
+    DemoAgentAdapter,
+)
+from app.config import Settings
 from app.http_agent import ExternalAgentConfiguration
 from app.main import app
 from app.models import AgentMode, AgentTarget
@@ -19,7 +25,12 @@ from app.scenario_packs import (
     ScenarioPackNotFoundError,
     ScenarioPackRegistry,
 )
-from app.scenario_runner import RunStatus, ScenarioRunResult, scenario_runner
+from app.scenario_runner import (
+    ExecutionErrorCategory,
+    RunStatus,
+    ScenarioRunResult,
+    scenario_runner,
+)
 from app.scenarios import Scenario
 from app.test_runs import (
     InMemoryRunStore,
@@ -245,6 +256,120 @@ class ExplodingRunner:
         turn_timeout_seconds: float = 5.0,
     ) -> ScenarioRunResult:
         raise RuntimeError("private orchestration details")
+
+
+class RecordingRunner:
+    def __init__(self) -> None:
+        self.turn_timeouts: list[float] = []
+
+    async def run(
+        self,
+        scenario: Scenario | None,
+        adapter: AgentAdapter,
+        *,
+        turn_timeout_seconds: float = 5.0,
+    ) -> ScenarioRunResult:
+        self.turn_timeouts.append(turn_timeout_seconds)
+        return await scenario_runner.run(
+            scenario,
+            adapter,
+            turn_timeout_seconds=turn_timeout_seconds,
+        )
+
+
+def _external_agent_configuration() -> ExternalAgentConfiguration:
+    return ExternalAgentConfiguration(endpoint_url="https://agent.example.com/turn")
+
+
+async def _execute_external_run(
+    runner: RecordingRunner,
+    settings: Settings,
+    *,
+    adapter: AgentAdapter | None = None,
+) -> tuple[InMemoryRunStore, UUID]:
+    store = InMemoryRunStore()
+    service = RunService(
+        store=store,
+        runner=runner,
+        http_adapter_factory=lambda _configuration: adapter
+        or DemoAgentAdapter(AgentMode.HEALTHY),
+        settings=settings,
+    )
+    created = await service.create_run(
+        "insurance-v1",
+        AgentMode.HEALTHY,
+        agent_target=AgentTarget.EXTERNAL_HTTP,
+        external_agent=_external_agent_configuration(),
+    )
+    await service.wait_for_completion(created.run_id)
+    return store, created.run_id
+
+
+def test_external_run_passes_sixty_second_setting_to_runner() -> None:
+    runner = RecordingRunner()
+    settings = Settings(_env_file=None, external_agent_timeout_seconds=60.0)
+
+    asyncio.run(_execute_external_run(runner, settings))
+
+    assert runner.turn_timeouts == [60.0] * 10
+
+
+def test_external_run_propagates_custom_lower_timeout_exactly() -> None:
+    runner = RecordingRunner()
+    settings = Settings(_env_file=None, external_agent_timeout_seconds=0.25)
+
+    asyncio.run(_execute_external_run(runner, settings))
+
+    assert runner.turn_timeouts == [0.25] * 10
+
+
+def test_built_in_demo_keeps_five_second_runner_default() -> None:
+    async def execute() -> RecordingRunner:
+        runner = RecordingRunner()
+        service = RunService(
+            store=InMemoryRunStore(),
+            runner=runner,
+            settings=Settings(_env_file=None, external_agent_timeout_seconds=60.0),
+        )
+        created = await service.create_run("insurance-v1", AgentMode.HEALTHY)
+        await service.wait_for_completion(created.run_id)
+        return runner
+
+    runner = asyncio.run(execute())
+
+    assert runner.turn_timeouts == [5.0] * 10
+
+
+def test_slow_external_turn_exceeding_configured_budget_is_agent_timeout() -> None:
+    class SlowExternalAdapter:
+        @property
+        def label(self) -> str:
+            return "external_http"
+
+        async def start_session(self) -> AgentSession:
+            return AgentSession(session_id="slow-session")
+
+        async def send_message(
+            self,
+            session: AgentSession,
+            message: str,
+        ) -> AgentTurnResult:
+            await asyncio.sleep(1)
+            raise AssertionError("Runner should cancel the turn at the configured deadline")
+
+    runner = RecordingRunner()
+    settings = Settings(_env_file=None, external_agent_timeout_seconds=0.02)
+    store, run_id = asyncio.run(
+        _execute_external_run(runner, settings, adapter=SlowExternalAdapter())
+    )
+
+    results = store.get_results(run_id).results
+    assert runner.turn_timeouts == [0.02] * 10
+    assert all(result.status is RunStatus.ERROR for result in results)
+    assert all(
+        result.execution_error_category == ExecutionErrorCategory.AGENT_TIMEOUT.value
+        for result in results
+    )
 
 
 def test_orchestration_exception_sets_safe_run_error() -> None:
