@@ -522,13 +522,18 @@ class RunService:
         store: RunStore,
         runner: ScenarioRunExecutor = scenario_runner,
         adapter_factory: DemoAgentAdapterFactory = DemoAgentAdapter,
-        http_adapter_factory: HttpAgentAdapterFactory = build_http_agent_adapter,
+        http_adapter_factory: HttpAgentAdapterFactory | None = None,
+        settings: Settings | None = None,
     ) -> None:
+        self._settings = settings or get_settings()
         self._registry = registry
         self._store = store
         self._runner = runner
         self._adapter_factory = adapter_factory
-        self._http_adapter_factory = http_adapter_factory
+        self._http_adapter_factory = http_adapter_factory or partial(
+            build_http_agent_adapter,
+            settings=self._settings,
+        )
         self._tasks: dict[UUID, asyncio.Task[None]] = {}
 
     @staticmethod
@@ -563,6 +568,7 @@ class RunService:
                 agent_mode,
             )
             agent_label = agent_mode.value
+            turn_timeout_seconds = None
         else:
             if external_agent is None:
                 raise InvalidRunAgentConfigurationError(
@@ -574,6 +580,7 @@ class RunService:
                 ephemeral_configuration,
             )
             agent_label = AgentTarget.EXTERNAL_HTTP.value
+            turn_timeout_seconds = self._settings.external_agent_timeout_seconds
 
         summary = await self._store_call(
             partial(
@@ -586,7 +593,12 @@ class RunService:
             )
         )
         task = asyncio.create_task(
-            self._execute_run(summary.run_id, scenarios, adapter_factory),
+            self._execute_run(
+                summary.run_id,
+                scenarios,
+                adapter_factory,
+                turn_timeout_seconds=turn_timeout_seconds,
+            ),
             name=f"sinama-run-{summary.run_id}",
         )
         self._tasks[summary.run_id] = task
@@ -604,14 +616,21 @@ class RunService:
         run_id: UUID,
         scenarios: list[Scenario],
         adapter_factory: ScenarioAdapterFactory,
+        *,
+        turn_timeout_seconds: float | None,
     ) -> None:
         try:
             await self._store_call(partial(self._store.mark_running, run_id))
             for scenario in scenarios:
-                result = await self._runner.run(
-                    scenario,
-                    adapter_factory(),
-                )
+                adapter = adapter_factory()
+                if turn_timeout_seconds is None:
+                    result = await self._runner.run(scenario, adapter)
+                else:
+                    result = await self._runner.run(
+                        scenario,
+                        adapter,
+                        turn_timeout_seconds=turn_timeout_seconds,
+                    )
                 await self._store_call(partial(self._store.add_result, run_id, result))
             await self._store_call(partial(self._store.mark_completed, run_id))
         except Exception:
