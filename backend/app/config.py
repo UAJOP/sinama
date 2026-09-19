@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     )
     run_store_backend: RunStoreBackend = RunStoreBackend.MEMORY
     database_url: SecretStr | None = None
+    keepalive_secret: SecretStr | None = None
     run_history_limit: int = Field(default=20, ge=1, le=100)
 
     # Semantic evaluation is deliberately opt-in. Deterministic execution remains
