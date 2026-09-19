@@ -1,10 +1,11 @@
 import asyncio
+import hmac
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from uuid import UUID
 
-from fastapi import FastAPI, HTTPException, Query, Request, status
+from fastapi import FastAPI, Header, HTTPException, Query, Request, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -72,6 +73,17 @@ def _harden_persistent_database() -> int:
         engine.dispose()
 
 
+def _ping_persistent_database() -> None:
+    engine = create_run_store_engine(settings)
+    try:
+        with engine.connect() as connection:
+            value = connection.exec_driver_sql("SELECT 1").scalar_one()
+            if value != 1:
+                raise RuntimeError("Database keepalive returned an unexpected result.")
+    finally:
+        engine.dispose()
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
     hardened = await asyncio.to_thread(_harden_persistent_database)
@@ -120,6 +132,32 @@ async def sanitized_validation_error(
 @app.get("/health", response_model=HealthResponse, tags=["system"])
 def health() -> HealthResponse:
     return HealthResponse()
+
+
+@app.get("/api/system/database-keepalive", tags=["system"])
+async def database_keepalive(
+    authorization: str | None = Header(default=None),
+) -> dict[str, str]:
+    """Verify the persistent database through a secret-protected real query."""
+
+    configured_secret = settings.keepalive_secret
+    if configured_secret is None or not configured_secret.get_secret_value().strip():
+        raise HTTPException(status_code=503, detail="Database keepalive is not configured")
+
+    expected = f"Bearer {configured_secret.get_secret_value().strip()}"
+    if authorization is None or not hmac.compare_digest(authorization, expected):
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    if not settings.uses_persistent_run_store:
+        raise HTTPException(status_code=503, detail="Persistent database is not configured")
+
+    try:
+        await asyncio.to_thread(_ping_persistent_database)
+    except Exception as error:
+        logger.exception("Database keepalive query failed.")
+        raise HTTPException(status_code=503, detail="Database unavailable") from error
+
+    return {"status": "ok", "database": "reachable"}
 
 
 @app.post(
