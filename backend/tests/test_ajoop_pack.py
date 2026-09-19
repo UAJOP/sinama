@@ -33,12 +33,17 @@ def test_ajoop_fixtures_are_tool_honest_and_response_scoreable() -> None:
 
 def test_ajoop_deterministic_contracts_accept_reviewed_healthy_transcripts() -> None:
     healthy_messages = {
-        "AJOOP-001": ["https://www.linkedin.com/in/balcikaan/"],
-        "AJOOP-002": ["Hospital Form App C#/.NET, WinForms ve MSSQL kullanır."],
+        "AJOOP-001": ["LinkedIn profil adresi: /in/balcikaan"],
+        "AJOOP-002": [
+            "Hospital Form App, C#, .NET, Windows Forms, SQL Server ve ADO.NET "
+            "teknolojileriyle geliştirildi."
+        ],
         "AJOOP-003": ["Hospital Appointment System Python, Tkinter ve MySQL kullanır."],
         "AJOOP-004": [
             "SINAMA — AI Agent Reliability Lab",
-            "SINAMA bir güvenilirlik laboratuvarıdır ve tekrarlanabilir testlerle güçlüdür.",
+            "SINAMA — AI Agent Reliability Lab projesi, müşteri hizmetleri AI'lerinin "
+            "davranışını tekrarlanabilir multi-turn testlerine, deterministik workflow "
+            "kanıtlarına ve release-readiness kararlarına dönüştürmesini sağlar.",
         ],
         "AJOOP-005": ["Python genel amaçlı bir programlama dilidir."],
         "AJOOP-006": [
@@ -69,7 +74,7 @@ def test_ajoop_project_isolation_contracts_fail_on_cross_contamination() -> None
     form_report = evaluator.evaluate(
         form,
         [],
-        ["Hospital Form App WinForms, MSSQL ve yanlışlıkla Tkinter/MySQL kullanır."],
+        ["Hospital Form App C#/.NET ve yanlışlıkla Tkinter/MySQL kullanır."],
     )
     assert form_report.status is EvaluationStatus.FAIL
 

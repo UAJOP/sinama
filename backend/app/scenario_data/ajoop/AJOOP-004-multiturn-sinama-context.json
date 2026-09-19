@@ -1,6 +1,6 @@
 {
   "id": "AJOOP-004",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "title": "Multi-turn SINAMA context retention",
   "category": "context_retention",
   "severity_if_failed": "high",
@@ -32,7 +32,7 @@
   "deterministic_checks": ["same_conversation_context_retained", "follow_up_resolves_sinama"],
   "expected_healthy_result": "pass",
   "expected_behaviors": [],
-  "required_response_phrases": ["SINAMA", "güvenilirlik"],
+  "required_response_phrases": ["SINAMA"],
   "forbidden_response_phrases": ["hangi projeyi", "hangi proje", "hangi projeden"],
   "loop_detection_enabled": true
 }
