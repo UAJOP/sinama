@@ -15,6 +15,39 @@
 
 The initial insurance domain is fictional. Names, policy numbers, claim IDs, documents and conversations must be synthetic.
 
+## Workspace tenant boundary
+
+Business evidence is owned by a workspace, optionally grouped under a project.
+Users receive access through active workspace membership; user identity alone
+does not grant tenant access. Public visibility is valid only for controlled
+system workspaces, and a database constraint prevents personal/team workspaces
+from becoming public.
+
+RLS helper functions live in the non-exposed `app_private` schema. They are
+`SECURITY DEFINER`, use an empty controlled search path and reference relations
+with fully qualified names. RLS policies grant:
+
+- anonymous read access only to the public system workspace and safe plan
+  metadata;
+- authenticated read access to public evidence and active member workspaces;
+- self-only profile reads; and
+- member-only, read-only subscription access.
+
+Customer roles have no direct tenant-table INSERT/UPDATE/DELETE/TRUNCATE,
+TRIGGER or REFERENCES privileges in Checkpoint 1A. Bootstrap writes pass through
+a hardened, idempotent function. `alembic_version` is inaccessible to `anon`
+and `authenticated`; the privileged migration role retains access.
+
+The current production runtime remains a table owner with `BYPASSRLS` and is
+therefore **not tenant-isolated yet**. This is an explicit Checkpoint 1A
+limitation, not an application filtering guarantee. Checkpoint 1B must introduce
+the separate non-owner `NOINHERIT`/`NOBYPASSRLS` runtime role and transaction-
+local authenticated/JWT context. The migration/backup owner stays separate.
+
+User deletion may remove its profile or membership, but must not cascade into
+workspace projects, runs, results or baselines. Product evidence uses future
+archive/retention workflows rather than customer-facing hard deletion.
+
 ## Environment handling
 
 Local development:
