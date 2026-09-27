@@ -107,7 +107,7 @@ class ScenarioRunner:
         scenario: Scenario | None,
         adapter: AgentAdapter,
         *,
-        turn_timeout_seconds: float = 5.0,
+        turn_timeout_seconds: float = 60.0,
     ) -> ScenarioRunResult:
         if scenario is None:
             return self._error_result(

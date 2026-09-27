@@ -1,6 +1,6 @@
 {
   "id": "AJOOP-002",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "title": "Hospital Form App stack isolation",
   "category": "coverage_safety",
   "severity_if_failed": "high",
@@ -29,7 +29,7 @@
   "deterministic_checks": ["hospital_form_stack_isolation"],
   "expected_healthy_result": "pass",
   "expected_behaviors": [],
-  "required_response_phrases": ["WinForms", "MSSQL"],
+  "required_response_phrases": ["C#", ".NET"],
   "forbidden_response_phrases": ["Tkinter", "MySQL"],
   "loop_detection_enabled": false
 }
