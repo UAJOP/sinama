@@ -14,7 +14,10 @@ dependencies = [
   "httpx>=0.28,<1",
   "psycopg[binary]>=3.2,<4",
   "pydantic-settings>=2.7,<3",
-  "sqlalchemy>=2.0,<3",
+  # <2.1: SQLAlchemy 2.1 makes Result/Select generics variadic, and under
+  # `mypy --strict` scalar_one()/scalars() then infer Never. Lift the cap
+  # together with a typing pass (and requirements.txt).
+  "sqlalchemy>=2.0,<2.1",
   "uvicorn[standard]>=0.34,<1",
 ]
 
