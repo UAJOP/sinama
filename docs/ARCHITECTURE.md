@@ -169,12 +169,29 @@ The controlled `sinama-public-demo` system workspace contains migrated
 private `sinama-legacy-private` system workspace. Unknown legacy agent targets
 fail the migration instead of inheriting public visibility.
 
+Workspace, project and subscription resource IDs are opaque UUIDs. Stable
+`system_key` values identify the two system workspaces, while the unique
+`personal_owner_id` business anchor makes personal bootstrap idempotent without
+encoding an Auth user ID into a resource primary key.
+
 Personal bootstrap creates a profile, a private personal workspace, an owner
 membership and one active free subscription. It deliberately creates no
 project; customer projects remain an explicit post-onboarding action. A hardened
 auth trigger is best-effort, and the same independently idempotent logic is
 available through a no-argument authenticated repair function derived from
 `auth.uid()`.
+
+Once a run is tenant-stamped, both workspace and project are mandatory. Composite
+database constraints keep the project in the run's workspace and keep result and
+baseline ownership identical to the parent run. Only old-runtime writes may use
+the transitional `NULL`/`NULL` ownership pair, and those rows are invisible to
+customer roles. The contract migration must classify and backfill every such
+straggler before making ownership non-null: runs with the same fail-closed
+`agent_target` + collection rule as 0005, results and baselines from their parent
+run. This includes baselines the old runtime rewrites, because its
+delete-and-insert `set_baseline` produces a new `NULL`/`NULL` row.
+Baseline identity remains pack-scoped in 1A; it must become project-scoped in a
+later 1B/1D contract step before multiple projects can safely share a pack ID.
 
 PostgreSQL RLS answers only which workspace rows a principal may read. It does
 not contain entitlement, pricing or usage rules. Anonymous principals can read
@@ -189,6 +206,12 @@ pre-auth API bypasses these policies. Checkpoint 1B must move application
 requests to a non-owner, `NOINHERIT`, `NOBYPASSRLS` runtime role and set the
 authenticated role/JWT claims transaction-locally after authorization.
 
+Consequently, the current FastAPI endpoints can still expose legacy—including
+external-agent/AJOOP—run history until 1B. No real customer signup or customer data
+ingestion may be enabled before authenticated runtime isolation is complete.
+Supabase email signups and anonymous sign-ins remain disabled until the auth
+product flow is intentionally released.
+
 Future background execution follows a narrow system-writer exception:
 
 ```text
@@ -201,6 +224,20 @@ authenticated request
 The worker must not accept a tenant identifier supplied later by a client.
 Provider-specific billing identifiers and adapters remain outside the core
 subscription tables.
+
+Subscription fallback: bootstrap and repair create the initial Free
+subscription only for a workspace that has never had one. An ended subscription
+stays as history and is never replaced by repair; billing adapters own every
+later transition. Entitlement resolution (1B) must therefore treat a workspace
+without a current subscription as Free, which is the floor and never a paid
+capability. A downgrade only restricts future actions and never deletes data.
+
+Downgrading revision 0005 is refused once customer tenancy exists. On a
+system-only database it removes 0005 objects but keeps RLS enabled on the
+evidence tables and `alembic_version` and does not restore the broad
+anon/authenticated grants. Dropping the `auth.users` trigger requires owning
+that table or being able to `SET ROLE` to its owner; otherwise the downgrade
+rolls back before changing anything.
 
 ## Regression / trends / readiness
 

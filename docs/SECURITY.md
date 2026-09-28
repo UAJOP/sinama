@@ -17,8 +17,9 @@ The initial insurance domain is fictional. Names, policy numbers, claim IDs, doc
 
 ## Workspace tenant boundary
 
-Business evidence is owned by a workspace, optionally grouped under a project.
-Users receive access through active workspace membership; user identity alone
+Business evidence is owned by a workspace. A tenant-stamped run also belongs to
+a project in that same workspace, and database constraints keep its results
+and baselines on the parent run's workspace/project. Users receive access through active workspace membership; user identity alone
 does not grant tenant access. Public visibility is valid only for controlled
 system workspaces, and a database constraint prevents personal/team workspaces
 from becoming public.
@@ -36,7 +37,11 @@ with fully qualified names. RLS policies grant:
 Customer roles have no direct tenant-table INSERT/UPDATE/DELETE/TRUNCATE,
 TRIGGER or REFERENCES privileges in Checkpoint 1A. Bootstrap writes pass through
 a hardened, idempotent function. `alembic_version` is inaccessible to `anon`
-and `authenticated`; the privileged migration role retains access.
+and `authenticated`, has RLS enabled with no customer policy, and the privileged
+migration role retains access. The account repair function explicitly removes
+default execute access from `PUBLIC`, `anon` and `service_role`; only
+`authenticated` may invoke it, and it derives identity exclusively from
+`auth.uid()`.
 
 The current production runtime remains a table owner with `BYPASSRLS` and is
 therefore **not tenant-isolated yet**. This is an explicit Checkpoint 1A
@@ -44,9 +49,67 @@ limitation, not an application filtering guarantee. Checkpoint 1B must introduce
 the separate non-owner `NOINHERIT`/`NOBYPASSRLS` runtime role and transaction-
 local authenticated/JWT context. The migration/backup owner stays separate.
 
+Until that transition, existing FastAPI endpoints still use the owner connection
+and may expose legacy public and external-agent (including AJOOP) run history.
+Real customer
+signup/data ingestion must not be enabled. Supabase email signup and anonymous
+sign-in remain disabled until the authenticated product flow is deliberately
+released.
+
 User deletion may remove its profile or membership, but must not cascade into
 workspace projects, runs, results or baselines. Product evidence uses future
 archive/retention workflows rather than customer-facing hard deletion.
+
+The 0005 `SECURITY DEFINER` functions are owned by the migration role. Repair
+reads `auth.users`, which has RLS enabled in production, so that owner must keep
+`BYPASSRLS` (production `postgres` has it). Checkpoint 1B must not transfer
+these functions to the non-owner, `NOBYPASSRLS` runtime role.
+
+The best-effort signup trigger reports only the failure SQLSTATE and leaves the
+Auth insertion intact. Repair fills only missing bootstrap rows: it never
+reactivates or promotes an existing membership and never replaces a
+subscription that has ended. Operations can run this privileged, aggregate
+health check without returning profile metadata or payload contents. It counts
+accounts whose bootstrap never completed; a membership that exists but is not
+active, or a subscription that has ended, is not a bootstrap gap:
+
+```sql
+SELECT count(DISTINCT auth_user.id) AS accounts_needing_bootstrap_repair
+FROM auth.users AS auth_user
+LEFT JOIN public.profiles AS profile ON profile.id = auth_user.id
+LEFT JOIN public.workspaces AS workspace
+  ON workspace.personal_owner_id = auth_user.id
+ AND workspace.kind = 'personal'
+ AND workspace.visibility = 'private'
+LEFT JOIN public.workspace_members AS member
+  ON member.workspace_id = workspace.id
+ AND member.user_id = auth_user.id
+LEFT JOIN public.subscriptions AS subscription
+  ON subscription.workspace_id = workspace.id
+WHERE profile.id IS NULL
+   OR workspace.id IS NULL
+   OR member.user_id IS NULL
+   OR subscription.id IS NULL;
+```
+
+Downgrading 0005 never reopens access. RLS stays enabled on `test_runs`,
+`scenario_results`, `run_baselines` and `alembic_version`, and the broad
+anon/authenticated grants that 0005 revoked are not restored. The downgrade is
+also refused once customer tenancy state exists.
+
+The PostgreSQL CI shim mirrors the `auth`/`public` grants captured in the
+production pre-migration dump. Migrations run through a real LOGIN session as a
+non-superuser migrator. Like production `postgres`, it has `BYPASSRLS` and holds
+TRIGGER/REFERENCES on `auth.users` without inheriting that table's owner.
+`auth.users` has RLS enabled, as in production, and its writes run as
+`supabase_auth_admin`. Public-schema default ACLs grant ALL to `anon`,
+`authenticated` and `service_role`. Role memberships are not part of that dump,
+so the shim *assumes* the migrator may `SET ROLE` to the `auth.users` owner, and
+separately proves that the downgrade fails closed when it cannot. None of this
+is proof of real Supabase behavior. A throwaway Supabase rehearsal remains a
+release gate before promotion to production/main. It must cover `auth.users`
+ownership and role membership, trigger create/drop permissions, exact default
+ACLs and GoTrue trigger interaction.
 
 ## Environment handling
 
