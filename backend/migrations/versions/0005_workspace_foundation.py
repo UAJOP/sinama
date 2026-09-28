@@ -7,14 +7,21 @@ Create Date: 2026-09-28
 This is an expand migration. Existing runtime writes remain valid because the
 ownership columns added to run evidence are nullable. Contract enforcement and
 the non-owner runtime role transition belong to later checkpoints.
+
+Downgrade refuses to run once customer tenancy state exists. It removes only
+0005-owned objects and keeps the tightened access on pre-existing tables: RLS
+stays enabled on the evidence tables and alembic_version, and the broad
+anon/authenticated grants 0005 revoked are not restored.
 """
 
 from collections.abc import Sequence
 from datetime import UTC, datetime
+from uuid import UUID
 
 import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.exc import DBAPIError
 
 revision: str = "0005"
 down_revision: str | None = "0004"
@@ -24,17 +31,23 @@ depends_on: str | Sequence[str] | None = None
 JSON_PAYLOAD = sa.JSON().with_variant(JSONB(), "postgresql")
 TIMESTAMP = sa.DateTime(timezone=True)
 
-WORKSPACE_ID_LENGTH = 128
-PROJECT_ID_LENGTH = 128
 PLAN_CODE_LENGTH = 32
 ENTITLEMENT_KEY_LENGTH = 128
 LABEL_LENGTH = 128
 STATUS_LENGTH = 32
 
-PUBLIC_WORKSPACE_ID = "sinama-public-demo"
-PRIVATE_WORKSPACE_ID = "sinama-legacy-private"
-PUBLIC_PROJECT_ID = "system-project-public-demo"
-PRIVATE_PROJECT_ID = "system-project-legacy-private"
+PUBLIC_WORKSPACE_KEY = "sinama-public-demo"
+PRIVATE_WORKSPACE_KEY = "sinama-legacy-private"
+PUBLIC_WORKSPACE_ID = UUID("10000000-0000-4000-8000-000000000001")
+PRIVATE_WORKSPACE_ID = UUID("10000000-0000-4000-8000-000000000002")
+PUBLIC_PROJECT_ID = UUID("20000000-0000-4000-8000-000000000001")
+PRIVATE_PROJECT_ID = UUID("20000000-0000-4000-8000-000000000002")
+PUBLIC_SUBSCRIPTION_ID = UUID("30000000-0000-4000-8000-000000000001")
+PRIVATE_SUBSCRIPTION_ID = UUID("30000000-0000-4000-8000-000000000002")
+
+# Frozen migration-time allow-list. Only this collection supports the built-in
+# demo in the revision 0005 application model; inconsistent pairs fail closed.
+BUILT_IN_DEMO_COLLECTION_IDS = ("insurance-v1",)
 
 
 def _is_postgresql() -> bool:
@@ -52,7 +65,9 @@ def _create_foundation_tables() -> None:
     )
     op.create_table(
         "workspaces",
-        sa.Column("id", sa.String(length=WORKSPACE_ID_LENGTH), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("system_key", sa.String(length=LABEL_LENGTH), nullable=True),
+        sa.Column("personal_owner_id", sa.Uuid(), nullable=True),
         sa.Column("name", sa.String(length=LABEL_LENGTH), nullable=False),
         sa.Column("kind", sa.String(length=STATUS_LENGTH), nullable=False),
         sa.Column("visibility", sa.String(length=STATUS_LENGTH), nullable=False),
@@ -70,11 +85,19 @@ def _create_foundation_tables() -> None:
             "visibility <> 'public' OR kind = 'system'",
             name="ck_workspaces_public_requires_system",
         ),
+        sa.CheckConstraint(
+            "(kind = 'system' AND system_key IS NOT NULL AND personal_owner_id IS NULL) "
+            "OR (kind = 'personal' AND system_key IS NULL AND personal_owner_id IS NOT NULL) "
+            "OR (kind = 'team' AND system_key IS NULL AND personal_owner_id IS NULL)",
+            name="ck_workspaces_identity_anchor",
+        ),
         sa.PrimaryKeyConstraint("id"),
+        sa.UniqueConstraint("system_key", name="uq_workspaces_system_key"),
+        sa.UniqueConstraint("personal_owner_id", name="uq_workspaces_personal_owner_id"),
     )
     op.create_table(
         "workspace_members",
-        sa.Column("workspace_id", sa.String(length=WORKSPACE_ID_LENGTH), nullable=False),
+        sa.Column("workspace_id", sa.Uuid(), nullable=False),
         sa.Column("user_id", sa.Uuid(), nullable=False),
         sa.Column("role", sa.String(length=STATUS_LENGTH), nullable=False),
         sa.Column("status", sa.String(length=STATUS_LENGTH), nullable=False),
@@ -89,11 +112,6 @@ def _create_foundation_tables() -> None:
         ),
         sa.ForeignKeyConstraint(["workspace_id"], ["workspaces.id"]),
         sa.PrimaryKeyConstraint("workspace_id", "user_id"),
-        sa.UniqueConstraint(
-            "workspace_id",
-            "user_id",
-            name="uq_workspace_members_workspace_user",
-        ),
     )
     op.create_index(
         "ix_workspace_members_user_status",
@@ -102,8 +120,8 @@ def _create_foundation_tables() -> None:
     )
     op.create_table(
         "projects",
-        sa.Column("id", sa.String(length=PROJECT_ID_LENGTH), nullable=False),
-        sa.Column("workspace_id", sa.String(length=WORKSPACE_ID_LENGTH), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("workspace_id", sa.Uuid(), nullable=False),
         sa.Column("name", sa.String(length=LABEL_LENGTH), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
         sa.Column("created_at", TIMESTAMP, nullable=False),
@@ -136,8 +154,8 @@ def _create_foundation_tables() -> None:
     )
     op.create_table(
         "subscriptions",
-        sa.Column("id", sa.String(length=WORKSPACE_ID_LENGTH), nullable=False),
-        sa.Column("workspace_id", sa.String(length=WORKSPACE_ID_LENGTH), nullable=False),
+        sa.Column("id", sa.Uuid(), nullable=False),
+        sa.Column("workspace_id", sa.Uuid(), nullable=False),
         sa.Column("plan_code", sa.String(length=PLAN_CODE_LENGTH), nullable=False),
         sa.Column("status", sa.String(length=STATUS_LENGTH), nullable=False),
         sa.Column("source", sa.String(length=STATUS_LENGTH), nullable=False),
@@ -191,7 +209,9 @@ def _seed_foundation_rows() -> None:
 
     workspaces = sa.table(
         "workspaces",
-        sa.column("id", sa.String()),
+        sa.column("id", sa.Uuid()),
+        sa.column("system_key", sa.String()),
+        sa.column("personal_owner_id", sa.Uuid()),
         sa.column("name", sa.String()),
         sa.column("kind", sa.String()),
         sa.column("visibility", sa.String()),
@@ -203,6 +223,8 @@ def _seed_foundation_rows() -> None:
         [
             {
                 "id": PUBLIC_WORKSPACE_ID,
+                "system_key": PUBLIC_WORKSPACE_KEY,
+                "personal_owner_id": None,
                 "name": "SINAMA Public Demo",
                 "kind": "system",
                 "visibility": "public",
@@ -211,6 +233,8 @@ def _seed_foundation_rows() -> None:
             },
             {
                 "id": PRIVATE_WORKSPACE_ID,
+                "system_key": PRIVATE_WORKSPACE_KEY,
+                "personal_owner_id": None,
                 "name": "SINAMA Legacy Private",
                 "kind": "system",
                 "visibility": "private",
@@ -222,8 +246,8 @@ def _seed_foundation_rows() -> None:
 
     projects = sa.table(
         "projects",
-        sa.column("id", sa.String()),
-        sa.column("workspace_id", sa.String()),
+        sa.column("id", sa.Uuid()),
+        sa.column("workspace_id", sa.Uuid()),
         sa.column("name", sa.String()),
         sa.column("description", sa.Text()),
         sa.column("created_at", TIMESTAMP),
@@ -256,8 +280,8 @@ def _seed_foundation_rows() -> None:
 
     subscriptions = sa.table(
         "subscriptions",
-        sa.column("id", sa.String()),
-        sa.column("workspace_id", sa.String()),
+        sa.column("id", sa.Uuid()),
+        sa.column("workspace_id", sa.Uuid()),
         sa.column("plan_code", sa.String()),
         sa.column("status", sa.String()),
         sa.column("source", sa.String()),
@@ -272,7 +296,7 @@ def _seed_foundation_rows() -> None:
         subscriptions.insert(),
         [
             {
-                "id": "system-subscription-public-demo",
+                "id": PUBLIC_SUBSCRIPTION_ID,
                 "workspace_id": PUBLIC_WORKSPACE_ID,
                 "plan_code": "free",
                 "status": "active",
@@ -285,7 +309,7 @@ def _seed_foundation_rows() -> None:
                 "updated_at": now,
             },
             {
-                "id": "system-subscription-legacy-private",
+                "id": PRIVATE_SUBSCRIPTION_ID,
                 "workspace_id": PRIVATE_WORKSPACE_ID,
                 "plan_code": "free",
                 "status": "active",
@@ -304,23 +328,23 @@ def _seed_foundation_rows() -> None:
 def _add_expand_columns() -> None:
     op.add_column(
         "test_runs",
-        sa.Column("workspace_id", sa.String(length=WORKSPACE_ID_LENGTH), nullable=True),
+        sa.Column("workspace_id", sa.Uuid(), nullable=True),
     )
     op.add_column(
         "test_runs",
-        sa.Column("project_id", sa.String(length=PROJECT_ID_LENGTH), nullable=True),
+        sa.Column("project_id", sa.Uuid(), nullable=True),
     )
     op.add_column(
         "scenario_results",
-        sa.Column("workspace_id", sa.String(length=WORKSPACE_ID_LENGTH), nullable=True),
+        sa.Column("workspace_id", sa.Uuid(), nullable=True),
     )
     op.add_column(
         "run_baselines",
-        sa.Column("workspace_id", sa.String(length=WORKSPACE_ID_LENGTH), nullable=True),
+        sa.Column("workspace_id", sa.Uuid(), nullable=True),
     )
     op.add_column(
         "run_baselines",
-        sa.Column("project_id", sa.String(length=PROJECT_ID_LENGTH), nullable=True),
+        sa.Column("project_id", sa.Uuid(), nullable=True),
     )
     op.create_index(
         "ix_test_runs_workspace_created_at",
@@ -343,6 +367,14 @@ def _add_expand_columns() -> None:
 
 def _add_postgresql_constraints() -> None:
     connection = op.get_bind()
+    connection.exec_driver_sql(
+        "ALTER TABLE public.test_runs ADD CONSTRAINT uq_test_runs_run_workspace "
+        "UNIQUE (run_id, workspace_id)"
+    )
+    connection.exec_driver_sql(
+        "ALTER TABLE public.test_runs ADD CONSTRAINT uq_test_runs_run_workspace_project "
+        "UNIQUE (run_id, workspace_id, project_id)"
+    )
     statements = (
         "ALTER TABLE public.profiles ADD CONSTRAINT fk_profiles_auth_user "
         "FOREIGN KEY (id) REFERENCES auth.users(id) ON DELETE CASCADE NOT VALID",
@@ -350,14 +382,24 @@ def _add_postgresql_constraints() -> None:
         "FOREIGN KEY (user_id) REFERENCES auth.users(id) ON DELETE CASCADE NOT VALID",
         "ALTER TABLE public.test_runs ADD CONSTRAINT fk_test_runs_workspace "
         "FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) NOT VALID",
-        "ALTER TABLE public.test_runs ADD CONSTRAINT fk_test_runs_project "
-        "FOREIGN KEY (project_id) REFERENCES public.projects(id) NOT VALID",
+        "ALTER TABLE public.test_runs ADD CONSTRAINT ck_test_runs_workspace_project_pair "
+        "CHECK ((workspace_id IS NULL) = (project_id IS NULL)) NOT VALID",
+        "ALTER TABLE public.test_runs ADD CONSTRAINT fk_test_runs_project_workspace "
+        "FOREIGN KEY (project_id, workspace_id) "
+        "REFERENCES public.projects(id, workspace_id) MATCH SIMPLE NOT VALID",
         "ALTER TABLE public.scenario_results ADD CONSTRAINT fk_scenario_results_workspace "
         "FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) NOT VALID",
+        "ALTER TABLE public.scenario_results ADD CONSTRAINT fk_scenario_results_run_workspace "
+        "FOREIGN KEY (run_id, workspace_id) "
+        "REFERENCES public.test_runs(run_id, workspace_id) MATCH SIMPLE NOT VALID",
         "ALTER TABLE public.run_baselines ADD CONSTRAINT fk_run_baselines_workspace "
         "FOREIGN KEY (workspace_id) REFERENCES public.workspaces(id) NOT VALID",
-        "ALTER TABLE public.run_baselines ADD CONSTRAINT fk_run_baselines_project "
-        "FOREIGN KEY (project_id) REFERENCES public.projects(id) NOT VALID",
+        "ALTER TABLE public.run_baselines ADD CONSTRAINT ck_run_baselines_workspace_project_pair "
+        "CHECK ((workspace_id IS NULL) = (project_id IS NULL)) NOT VALID",
+        "ALTER TABLE public.run_baselines "
+        "ADD CONSTRAINT fk_run_baselines_run_workspace_project "
+        "FOREIGN KEY (run_id, workspace_id, project_id) "
+        "REFERENCES public.test_runs(run_id, workspace_id, project_id) MATCH SIMPLE NOT VALID",
     )
     for statement in statements:
         connection.exec_driver_sql(statement)
@@ -365,10 +407,13 @@ def _add_postgresql_constraints() -> None:
         ("fk_profiles_auth_user", "profiles"),
         ("fk_workspace_members_auth_user", "workspace_members"),
         ("fk_test_runs_workspace", "test_runs"),
-        ("fk_test_runs_project", "test_runs"),
+        ("ck_test_runs_workspace_project_pair", "test_runs"),
+        ("fk_test_runs_project_workspace", "test_runs"),
         ("fk_scenario_results_workspace", "scenario_results"),
+        ("fk_scenario_results_run_workspace", "scenario_results"),
         ("fk_run_baselines_workspace", "run_baselines"),
-        ("fk_run_baselines_project", "run_baselines"),
+        ("ck_run_baselines_workspace_project_pair", "run_baselines"),
+        ("fk_run_baselines_run_workspace_project", "run_baselines"),
     ):
         connection.exec_driver_sql(
             f'ALTER TABLE public."{table}" VALIDATE CONSTRAINT "{constraint}"'
@@ -380,7 +425,7 @@ def _create_postgresql_helpers() -> None:
     connection.exec_driver_sql("CREATE SCHEMA app_private")
     connection.exec_driver_sql(
         """
-        CREATE FUNCTION app_private.is_member(target_workspace_id text)
+        CREATE FUNCTION app_private.is_member(target_workspace_id uuid)
         RETURNS boolean
         LANGUAGE sql
         STABLE
@@ -399,7 +444,7 @@ def _create_postgresql_helpers() -> None:
     )
     connection.exec_driver_sql(
         """
-        CREATE FUNCTION app_private.has_role(target_workspace_id text, allowed_roles text[])
+        CREATE FUNCTION app_private.has_role(target_workspace_id uuid, allowed_roles text[])
         RETURNS boolean
         LANGUAGE sql
         STABLE
@@ -419,7 +464,7 @@ def _create_postgresql_helpers() -> None:
     )
     connection.exec_driver_sql(
         """
-        CREATE FUNCTION app_private.is_public_workspace(target_workspace_id text)
+        CREATE FUNCTION app_private.is_public_workspace(target_workspace_id uuid)
         RETURNS boolean
         LANGUAGE sql
         STABLE
@@ -445,8 +490,9 @@ def _create_postgresql_helpers() -> None:
         SET search_path = ''
         AS $$
         DECLARE
-            personal_workspace_id text := 'personal-' || target_user_id::text;
-            personal_subscription_id text := 'personal-subscription-' || target_user_id::text;
+            personal_workspace_id uuid;
+            resolved_kind text;
+            resolved_visibility text;
             resolved_display_name text := NULLIF(
                 pg_catalog.left(
                     COALESCE(raw_metadata ->> 'display_name', raw_metadata ->> 'full_name'),
@@ -456,30 +502,44 @@ def _create_postgresql_helpers() -> None:
             );
         BEGIN
             PERFORM pg_catalog.pg_advisory_xact_lock(
-                pg_catalog.hashtextextended(personal_workspace_id, 0)
+                pg_catalog.hashtextextended(target_user_id::text, 0)
             );
 
             INSERT INTO public.profiles (id, display_name, created_at, updated_at)
             VALUES (target_user_id, resolved_display_name, pg_catalog.now(), pg_catalog.now())
             ON CONFLICT (id) DO UPDATE
-            SET display_name = COALESCE(public.profiles.display_name, EXCLUDED.display_name),
-                updated_at = pg_catalog.now();
+            SET display_name = EXCLUDED.display_name,
+                updated_at = pg_catalog.now()
+            WHERE public.profiles.display_name IS NULL
+              AND EXCLUDED.display_name IS NOT NULL;
 
             INSERT INTO public.workspaces (
-                id, name, kind, visibility, created_at, updated_at
+                id, system_key, personal_owner_id, name, kind, visibility,
+                created_at, updated_at
             )
             VALUES (
-                personal_workspace_id,
-                COALESCE(
-                    pg_catalog.left(resolved_display_name, 118) || ' workspace',
-                    'Personal workspace'
-                ),
+                pg_catalog.gen_random_uuid(),
+                NULL,
+                target_user_id,
+                'Personal workspace',
                 'personal',
                 'private',
                 pg_catalog.now(),
                 pg_catalog.now()
             )
-            ON CONFLICT (id) DO NOTHING;
+            ON CONFLICT (personal_owner_id) DO NOTHING;
+
+            SELECT workspace.id, workspace.kind, workspace.visibility
+            INTO personal_workspace_id, resolved_kind, resolved_visibility
+            FROM public.workspaces AS workspace
+            WHERE workspace.personal_owner_id = target_user_id;
+
+            IF personal_workspace_id IS NULL
+               OR resolved_kind IS DISTINCT FROM 'personal'
+               OR resolved_visibility IS DISTINCT FROM 'private' THEN
+                RAISE EXCEPTION 'Personal workspace identity conflict'
+                    USING ERRCODE = 'integrity_constraint_violation';
+            END IF;
 
             INSERT INTO public.workspace_members (
                 workspace_id, user_id, role, status, created_at
@@ -487,15 +547,14 @@ def _create_postgresql_helpers() -> None:
             VALUES (
                 personal_workspace_id, target_user_id, 'owner', 'active', pg_catalog.now()
             )
-            ON CONFLICT (workspace_id, user_id) DO UPDATE
-            SET role = 'owner', status = 'active';
+            ON CONFLICT (workspace_id, user_id) DO NOTHING;
 
             INSERT INTO public.subscriptions (
                 id, workspace_id, plan_code, status, source, started_at,
                 current_period_start, current_period_end, ended_at, created_at, updated_at
             )
             SELECT
-                personal_subscription_id,
+                pg_catalog.gen_random_uuid(),
                 personal_workspace_id,
                 'free',
                 'active',
@@ -506,13 +565,14 @@ def _create_postgresql_helpers() -> None:
                 NULL,
                 pg_catalog.now(),
                 pg_catalog.now()
+            -- Bootstrap only: a workspace whose subscription later ended keeps
+            -- that history; repair never mints a replacement subscription.
             WHERE NOT EXISTS (
                 SELECT 1
                 FROM public.subscriptions AS subscription
                 WHERE subscription.workspace_id = personal_workspace_id
-                  AND subscription.status IN ('active', 'trialing', 'past_due')
             )
-            ON CONFLICT (id) DO NOTHING;
+            ON CONFLICT DO NOTHING;
         END
         $$
         """
@@ -532,7 +592,9 @@ def _create_postgresql_helpers() -> None:
             );
             RETURN NEW;
         EXCEPTION WHEN OTHERS THEN
-            RAISE WARNING 'SINAMA account bootstrap deferred for lazy repair';
+            -- SQLSTATE only: never echo user metadata or error detail.
+            RAISE WARNING USING MESSAGE =
+                'SINAMA account bootstrap deferred (SQLSTATE=' || SQLSTATE || ')';
             RETURN NEW;
         END
         $$
@@ -576,22 +638,24 @@ def _create_postgresql_helpers() -> None:
     connection.exec_driver_sql("REVOKE ALL ON SCHEMA app_private FROM PUBLIC")
     connection.exec_driver_sql("GRANT USAGE ON SCHEMA app_private TO anon, authenticated")
     for function in (
-        "app_private.is_member(text)",
-        "app_private.has_role(text,text[])",
-        "app_private.is_public_workspace(text)",
+        "app_private.is_member(uuid)",
+        "app_private.has_role(uuid,text[])",
+        "app_private.is_public_workspace(uuid)",
         "app_private.bootstrap_user(uuid,jsonb)",
         "app_private.handle_new_auth_user()",
         "public.repair_my_account()",
     ):
-        connection.exec_driver_sql(f"REVOKE ALL ON FUNCTION {function} FROM PUBLIC")
+        connection.exec_driver_sql(
+            f"REVOKE ALL ON FUNCTION {function} FROM PUBLIC, anon, authenticated, service_role"
+        )
     connection.exec_driver_sql(
-        "GRANT EXECUTE ON FUNCTION app_private.is_member(text) TO authenticated"
+        "GRANT EXECUTE ON FUNCTION app_private.is_member(uuid) TO authenticated"
     )
     connection.exec_driver_sql(
-        "GRANT EXECUTE ON FUNCTION app_private.has_role(text,text[]) TO authenticated"
+        "GRANT EXECUTE ON FUNCTION app_private.has_role(uuid,text[]) TO authenticated"
     )
     connection.exec_driver_sql(
-        "GRANT EXECUTE ON FUNCTION app_private.is_public_workspace(text) TO anon, authenticated"
+        "GRANT EXECUTE ON FUNCTION app_private.is_public_workspace(uuid) TO anon, authenticated"
     )
     connection.exec_driver_sql(
         "GRANT EXECUTE ON FUNCTION public.repair_my_account() TO authenticated"
@@ -614,6 +678,9 @@ def _create_postgresql_rls() -> None:
     )
     for table in tenant_tables:
         connection.exec_driver_sql(f'ALTER TABLE public."{table}" ENABLE ROW LEVEL SECURITY')
+    connection.exec_driver_sql(
+        "ALTER TABLE public.alembic_version ENABLE ROW LEVEL SECURITY"
+    )
 
     policies = (
         "CREATE POLICY profiles_select_self ON public.profiles FOR SELECT TO authenticated "
@@ -689,7 +756,7 @@ def _create_postgresql_rls() -> None:
     )
 
 
-def _evidence_signatures() -> tuple[int, int, int, str, str]:
+def _evidence_signatures() -> tuple[int, int, int, str, str, str]:
     connection = op.get_bind()
     run_count = connection.exec_driver_sql("SELECT count(*) FROM public.test_runs").scalar_one()
     result_count = connection.exec_driver_sql(
@@ -716,7 +783,23 @@ def _evidence_signatures() -> tuple[int, int, int, str, str]:
         FROM public.scenario_results
         """
     ).scalar_one()
-    return run_count, result_count, baseline_count, run_evidence, result_evidence
+    baseline_evidence = connection.exec_driver_sql(
+        """
+        SELECT md5(COALESCE(string_agg(
+            pack_id || '|' || run_id::text || '|' || updated_at::text,
+            E'\n' ORDER BY pack_id
+        ), ''))
+        FROM public.run_baselines
+        """
+    ).scalar_one()
+    return (
+        run_count,
+        result_count,
+        baseline_count,
+        run_evidence,
+        result_evidence,
+        baseline_evidence,
+    )
 
 
 def _backfill_and_assert() -> None:
@@ -726,13 +809,17 @@ def _backfill_and_assert() -> None:
         "IN SHARE ROW EXCLUSIVE MODE"
     )
     before = _evidence_signatures()
+    built_in_collection_sql = ", ".join(
+        f"'{collection_id}'" for collection_id in BUILT_IN_DEMO_COLLECTION_IDS
+    )
     unknown = connection.exec_driver_sql(
-        """
-        SELECT agent_target, count(*)
+        f"""
+        SELECT agent_target, pack_id, count(*)
         FROM public.test_runs
         WHERE agent_target NOT IN ('built_in_demo', 'external_http')
-        GROUP BY agent_target
-        ORDER BY agent_target
+           OR (agent_target = 'built_in_demo' AND pack_id NOT IN ({built_in_collection_sql}))
+        GROUP BY agent_target, pack_id
+        ORDER BY agent_target, pack_id
         """
     ).all()
     if unknown:
@@ -742,12 +829,12 @@ def _backfill_and_assert() -> None:
         """
         UPDATE public.test_runs
         SET workspace_id = CASE agent_target
-                WHEN 'built_in_demo' THEN 'sinama-public-demo'
-                WHEN 'external_http' THEN 'sinama-legacy-private'
+                WHEN 'built_in_demo' THEN '10000000-0000-4000-8000-000000000001'::uuid
+                WHEN 'external_http' THEN '10000000-0000-4000-8000-000000000002'::uuid
             END,
             project_id = CASE agent_target
-                WHEN 'built_in_demo' THEN 'system-project-public-demo'
-                WHEN 'external_http' THEN 'system-project-legacy-private'
+                WHEN 'built_in_demo' THEN '20000000-0000-4000-8000-000000000001'::uuid
+                WHEN 'external_http' THEN '20000000-0000-4000-8000-000000000002'::uuid
             END
         WHERE agent_target IN ('built_in_demo', 'external_http')
         """
@@ -800,6 +887,133 @@ def _backfill_and_assert() -> None:
         raise RuntimeError("0005 left orphaned or inconsistently owned baselines")
 
 
+def _guard_postgresql_downgrade() -> None:
+    connection = op.get_bind()
+    # Hold writers off until commit so a concurrent signup or tenant write cannot
+    # slip in between this check and the table drops below.
+    connection.exec_driver_sql(
+        "LOCK TABLE public.profiles, public.workspaces, public.workspace_members, "
+        "public.subscriptions, public.test_runs IN EXCLUSIVE MODE"
+    )
+    customer_state = connection.exec_driver_sql(
+        """
+        SELECT EXISTS (
+            SELECT 1 FROM public.profiles
+            UNION ALL
+            SELECT 1 FROM public.workspace_members
+            UNION ALL
+            SELECT 1 FROM public.workspaces WHERE kind <> 'system'
+            UNION ALL
+            SELECT 1
+            FROM public.subscriptions
+            WHERE id NOT IN (
+                '30000000-0000-4000-8000-000000000001'::uuid,
+                '30000000-0000-4000-8000-000000000002'::uuid
+            )
+            UNION ALL
+            SELECT 1
+            FROM public.test_runs
+            WHERE workspace_id IS NOT NULL
+              AND workspace_id NOT IN (
+                  '10000000-0000-4000-8000-000000000001'::uuid,
+                  '10000000-0000-4000-8000-000000000002'::uuid
+              )
+        )
+        """
+    ).scalar_one()
+    if customer_state:
+        raise RuntimeError(
+            "0005 downgrade blocked: customer tenancy state exists; "
+            "use a disposable database instead of removing tenant ownership"
+        )
+
+
+def _drop_auth_bootstrap_trigger() -> None:
+    """Drop the auth.users trigger, which PostgreSQL lets only the table owner do.
+
+    Creating the trigger needs just the TRIGGER privilege, but dropping it needs
+    ownership of auth.users, which Supabase gives to supabase_auth_admin. Try a
+    direct drop first (owner, inherited owner membership or a platform grant),
+    then act as the owner when the session may SET ROLE to it, otherwise fail
+    before anything else in the downgrade has run.
+    """
+
+    connection = op.get_bind()
+    drop_trigger = "DROP TRIGGER IF EXISTS on_auth_user_created_sinama_bootstrap ON auth.users"
+    try:
+        with connection.begin_nested():
+            connection.exec_driver_sql(drop_trigger)
+        return
+    except DBAPIError as error:
+        if getattr(error.orig, "sqlstate", None) != "42501":
+            raise
+
+    owner, previous_role, can_set_owner = connection.exec_driver_sql(
+        "SELECT pg_catalog.pg_get_userbyid(relowner), current_user, "
+        "pg_catalog.pg_has_role(session_user, relowner, 'SET') "
+        "FROM pg_catalog.pg_class WHERE oid = 'auth.users'::regclass"
+    ).one()
+    if not can_set_owner:
+        raise RuntimeError(
+            "0005 downgrade cannot drop the auth.users bootstrap trigger: the migration "
+            "role must own auth.users or be able to SET ROLE to its owner. "
+            "The downgrade was rolled back before any change."
+        )
+    quote = connection.dialect.identifier_preparer.quote
+    connection.exec_driver_sql(f"SET LOCAL ROLE {quote(owner)}")
+    connection.exec_driver_sql(drop_trigger)
+    connection.exec_driver_sql(f"SET LOCAL ROLE {quote(previous_role)}")
+
+
+def _drop_postgresql_security() -> None:
+    connection = op.get_bind()
+    for table, policy in (
+        ("profiles", "profiles_select_self"),
+        ("workspaces", "workspaces_select_public"),
+        ("workspaces", "workspaces_select_member"),
+        ("workspace_members", "workspace_members_select_member"),
+        ("projects", "projects_select_public"),
+        ("projects", "projects_select_member"),
+        ("subscriptions", "subscriptions_select_member"),
+        ("test_runs", "test_runs_select_public"),
+        ("test_runs", "test_runs_select_member"),
+        ("scenario_results", "scenario_results_select_public"),
+        ("scenario_results", "scenario_results_select_member"),
+        ("run_baselines", "run_baselines_select_public"),
+        ("run_baselines", "run_baselines_select_member"),
+        ("plans", "plans_select"),
+        ("plan_entitlements", "plan_entitlements_select"),
+    ):
+        connection.exec_driver_sql(
+            f'DROP POLICY IF EXISTS "{policy}" ON public."{table}"'
+        )
+    # RLS on the evidence tables belongs to 0003 and must survive this downgrade;
+    # alembic_version also stays closed. Only the reads 0005 granted are withdrawn,
+    # so the tables return to "RLS on, no customer policy, no customer grant".
+    connection.exec_driver_sql(
+        "REVOKE ALL ON TABLE public.test_runs, public.scenario_results, "
+        "public.run_baselines FROM anon, authenticated"
+    )
+
+    connection.exec_driver_sql("DROP FUNCTION IF EXISTS public.repair_my_account()")
+    connection.exec_driver_sql(
+        "DROP FUNCTION IF EXISTS app_private.handle_new_auth_user()"
+    )
+    connection.exec_driver_sql(
+        "DROP FUNCTION IF EXISTS app_private.bootstrap_user(uuid,jsonb)"
+    )
+    connection.exec_driver_sql(
+        "DROP FUNCTION IF EXISTS app_private.has_role(uuid,text[])"
+    )
+    connection.exec_driver_sql(
+        "DROP FUNCTION IF EXISTS app_private.is_member(uuid)"
+    )
+    connection.exec_driver_sql(
+        "DROP FUNCTION IF EXISTS app_private.is_public_workspace(uuid)"
+    )
+    connection.exec_driver_sql("DROP SCHEMA IF EXISTS app_private")
+
+
 def upgrade() -> None:
     if _is_postgresql():
         connection = op.get_bind()
@@ -824,19 +1038,22 @@ def downgrade() -> None:
     if _is_postgresql():
         connection = op.get_bind()
         connection.exec_driver_sql("SET LOCAL lock_timeout = '5s'")
-        connection.exec_driver_sql(
-            "DROP TRIGGER IF EXISTS on_auth_user_created_sinama_bootstrap ON auth.users"
-        )
-        connection.exec_driver_sql("DROP FUNCTION IF EXISTS public.repair_my_account()")
-        connection.exec_driver_sql("DROP SCHEMA IF EXISTS app_private CASCADE")
+        _guard_postgresql_downgrade()
+        _drop_auth_bootstrap_trigger()
+        _drop_postgresql_security()
         for constraint, table in (
             ("fk_profiles_auth_user", "profiles"),
             ("fk_workspace_members_auth_user", "workspace_members"),
             ("fk_test_runs_workspace", "test_runs"),
-            ("fk_test_runs_project", "test_runs"),
+            ("ck_test_runs_workspace_project_pair", "test_runs"),
+            ("fk_test_runs_project_workspace", "test_runs"),
             ("fk_scenario_results_workspace", "scenario_results"),
+            ("fk_scenario_results_run_workspace", "scenario_results"),
             ("fk_run_baselines_workspace", "run_baselines"),
-            ("fk_run_baselines_project", "run_baselines"),
+            ("ck_run_baselines_workspace_project_pair", "run_baselines"),
+            ("fk_run_baselines_run_workspace_project", "run_baselines"),
+            ("uq_test_runs_run_workspace_project", "test_runs"),
+            ("uq_test_runs_run_workspace", "test_runs"),
         ):
             connection.exec_driver_sql(
                 f'ALTER TABLE public."{table}" DROP CONSTRAINT IF EXISTS "{constraint}"'

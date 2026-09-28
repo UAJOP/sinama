@@ -23,6 +23,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     Integer,
     String,
@@ -42,8 +43,6 @@ SCENARIO_ID_LENGTH = 64
 LABEL_LENGTH = 128
 STATUS_LENGTH = 32
 AGENT_VERSION_LENGTH = 64
-WORKSPACE_ID_LENGTH = 128
-PROJECT_ID_LENGTH = 128
 PLAN_CODE_LENGTH = 32
 ENTITLEMENT_KEY_LENGTH = 128
 
@@ -70,16 +69,12 @@ class TestRunRow(Base):
     started_at: Mapped[datetime | None] = mapped_column(Timestamp, nullable=True)
     completed_at: Mapped[datetime | None] = mapped_column(Timestamp, nullable=True)
     error: Mapped[dict[str, Any] | None] = mapped_column(JsonPayload, nullable=True)
-    workspace_id: Mapped[str | None] = mapped_column(
-        String(WORKSPACE_ID_LENGTH),
+    workspace_id: Mapped[UUID | None] = mapped_column(
+        Uuid(),
         ForeignKey("workspaces.id"),
         nullable=True,
     )
-    project_id: Mapped[str | None] = mapped_column(
-        String(PROJECT_ID_LENGTH),
-        ForeignKey("projects.id"),
-        nullable=True,
-    )
+    project_id: Mapped[UUID | None] = mapped_column(Uuid(), nullable=True)
 
     __table_args__ = (
         Index("ix_test_runs_created_at", "created_at", "run_id"),
@@ -87,6 +82,22 @@ class TestRunRow(Base):
         Index("ix_test_runs_pack_created_at", "pack_id", "created_at", "run_id"),
         Index("ix_test_runs_workspace_created_at", "workspace_id", "created_at", "run_id"),
         Index("ix_test_runs_project_created_at", "project_id", "created_at", "run_id"),
+        CheckConstraint(
+            "(workspace_id IS NULL) = (project_id IS NULL)",
+            name="ck_test_runs_workspace_project_pair",
+        ),
+        UniqueConstraint("run_id", "workspace_id", name="uq_test_runs_run_workspace"),
+        UniqueConstraint(
+            "run_id",
+            "workspace_id",
+            "project_id",
+            name="uq_test_runs_run_workspace_project",
+        ),
+        ForeignKeyConstraint(
+            ["project_id", "workspace_id"],
+            ["projects.id", "projects.workspace_id"],
+            name="fk_test_runs_project_workspace",
+        ),
     )
 
 
@@ -108,8 +119,8 @@ class ScenarioResultRow(Base):
     goal_score: Mapped[int | None] = mapped_column(Integer, nullable=True)
     critical_failure_keys: Mapped[list[str] | None] = mapped_column(JsonPayload, nullable=True)
     payload: Mapped[dict[str, Any]] = mapped_column(JsonPayload, nullable=False)
-    workspace_id: Mapped[str | None] = mapped_column(
-        String(WORKSPACE_ID_LENGTH),
+    workspace_id: Mapped[UUID | None] = mapped_column(
+        Uuid(),
         ForeignKey("workspaces.id"),
         nullable=True,
     )
@@ -118,6 +129,11 @@ class ScenarioResultRow(Base):
         UniqueConstraint("run_id", "position", name="uq_scenario_results_run_position"),
         Index("ix_scenario_results_run_scenario", "run_id", "scenario_id"),
         Index("ix_scenario_results_workspace", "workspace_id", "run_id"),
+        ForeignKeyConstraint(
+            ["run_id", "workspace_id"],
+            ["test_runs.run_id", "test_runs.workspace_id"],
+            name="fk_scenario_results_run_workspace",
+        ),
     )
 
 
@@ -131,20 +147,25 @@ class RunBaselineRow(Base):
         nullable=False,
     )
     updated_at: Mapped[datetime] = mapped_column(Timestamp, nullable=False)
-    workspace_id: Mapped[str | None] = mapped_column(
-        String(WORKSPACE_ID_LENGTH),
+    workspace_id: Mapped[UUID | None] = mapped_column(
+        Uuid(),
         ForeignKey("workspaces.id"),
         nullable=True,
     )
-    project_id: Mapped[str | None] = mapped_column(
-        String(PROJECT_ID_LENGTH),
-        ForeignKey("projects.id"),
-        nullable=True,
-    )
+    project_id: Mapped[UUID | None] = mapped_column(Uuid(), nullable=True)
 
     __table_args__ = (
         Index("ix_run_baselines_workspace", "workspace_id"),
         Index("ix_run_baselines_project", "project_id"),
+        CheckConstraint(
+            "(workspace_id IS NULL) = (project_id IS NULL)",
+            name="ck_run_baselines_workspace_project_pair",
+        ),
+        ForeignKeyConstraint(
+            ["run_id", "workspace_id", "project_id"],
+            ["test_runs.run_id", "test_runs.workspace_id", "test_runs.project_id"],
+            name="fk_run_baselines_run_workspace_project",
+        ),
     )
 
 
@@ -160,7 +181,9 @@ class ProfileRow(Base):
 class WorkspaceRow(Base):
     __tablename__ = "workspaces"
 
-    id: Mapped[str] = mapped_column(String(WORKSPACE_ID_LENGTH), primary_key=True)
+    id: Mapped[UUID] = mapped_column(Uuid(), primary_key=True)
+    system_key: Mapped[str | None] = mapped_column(String(LABEL_LENGTH), unique=True)
+    personal_owner_id: Mapped[UUID | None] = mapped_column(Uuid(), unique=True)
     name: Mapped[str] = mapped_column(String(LABEL_LENGTH), nullable=False)
     kind: Mapped[str] = mapped_column(String(STATUS_LENGTH), nullable=False)
     visibility: Mapped[str] = mapped_column(String(STATUS_LENGTH), nullable=False)
@@ -180,14 +203,20 @@ class WorkspaceRow(Base):
             "visibility <> 'public' OR kind = 'system'",
             name="ck_workspaces_public_requires_system",
         ),
+        CheckConstraint(
+            "(kind = 'system' AND system_key IS NOT NULL AND personal_owner_id IS NULL) "
+            "OR (kind = 'personal' AND system_key IS NULL AND personal_owner_id IS NOT NULL) "
+            "OR (kind = 'team' AND system_key IS NULL AND personal_owner_id IS NULL)",
+            name="ck_workspaces_identity_anchor",
+        ),
     )
 
 
 class WorkspaceMemberRow(Base):
     __tablename__ = "workspace_members"
 
-    workspace_id: Mapped[str] = mapped_column(
-        String(WORKSPACE_ID_LENGTH),
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid(),
         ForeignKey("workspaces.id"),
         primary_key=True,
     )
@@ -197,7 +226,6 @@ class WorkspaceMemberRow(Base):
     created_at: Mapped[datetime] = mapped_column(Timestamp, nullable=False)
 
     __table_args__ = (
-        UniqueConstraint("workspace_id", "user_id", name="uq_workspace_members_workspace_user"),
         CheckConstraint(
             "role IN ('owner', 'admin', 'developer', 'reviewer', 'viewer')",
             name="ck_workspace_members_role",
@@ -213,9 +241,9 @@ class WorkspaceMemberRow(Base):
 class ProjectRow(Base):
     __tablename__ = "projects"
 
-    id: Mapped[str] = mapped_column(String(PROJECT_ID_LENGTH), primary_key=True)
-    workspace_id: Mapped[str] = mapped_column(
-        String(WORKSPACE_ID_LENGTH),
+    id: Mapped[UUID] = mapped_column(Uuid(), primary_key=True)
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid(),
         ForeignKey("workspaces.id"),
         nullable=False,
     )
@@ -255,9 +283,9 @@ class PlanEntitlementRow(Base):
 class SubscriptionRow(Base):
     __tablename__ = "subscriptions"
 
-    id: Mapped[str] = mapped_column(String(WORKSPACE_ID_LENGTH), primary_key=True)
-    workspace_id: Mapped[str] = mapped_column(
-        String(WORKSPACE_ID_LENGTH),
+    id: Mapped[UUID] = mapped_column(Uuid(), primary_key=True)
+    workspace_id: Mapped[UUID] = mapped_column(
+        Uuid(),
         ForeignKey("workspaces.id"),
         nullable=False,
     )
