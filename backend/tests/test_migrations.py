@@ -144,14 +144,14 @@ def test_0002_keeps_rows_written_before_it_valid(empty_database: Engine) -> None
 def test_0002_downgrade_removes_only_agent_version(empty_database: Engine) -> None:
     with empty_database.begin() as connection:
         config = _alembic_config(connection)
-        command.upgrade(config, "head")
-    at_head = {column["name"] for column in inspect(empty_database).get_columns("test_runs")}
+        command.upgrade(config, "0002")
+    at_0002 = {column["name"] for column in inspect(empty_database).get_columns("test_runs")}
 
     with empty_database.begin() as connection:
         command.downgrade(_alembic_config(connection), "0001")
     after = {column["name"] for column in inspect(empty_database).get_columns("test_runs")}
 
-    assert at_head - after == {"agent_version"}
+    assert at_0002 - after == {"agent_version"}
 
 
 def test_upgrade_downgrade_upgrade_round_trips(empty_database: Engine) -> None:

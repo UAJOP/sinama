@@ -79,14 +79,14 @@ def test_0004_downgrade_removes_only_trend_metadata(tmp_path: Path) -> None:
     engine = create_engine(f"sqlite:///{tmp_path / 'trend-downgrade.db'}", future=True)
     try:
         with engine.begin() as connection:
-            command.upgrade(config(connection), "head")
-        at_head = {column["name"] for column in inspect(engine).get_columns("scenario_results")}
+            command.upgrade(config(connection), "0004")
+        at_0004 = {column["name"] for column in inspect(engine).get_columns("scenario_results")}
 
         with engine.begin() as connection:
             command.downgrade(config(connection), "0003")
         after = {column["name"] for column in inspect(engine).get_columns("scenario_results")}
 
-        assert at_head - after == {"severity", "goal_score", "critical_failure_keys"}
+        assert at_0004 - after == {"severity", "goal_score", "critical_failure_keys"}
         assert {"test_runs", "scenario_results", "run_baselines"} <= set(
             inspect(engine).get_table_names()
         )
